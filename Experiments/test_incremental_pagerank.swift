@@ -1,6 +1,7 @@
 import Foundation
+import QuartzCore
 
-// MARK: - Core Types
+// MARK: - Core Types (Must match PersistentGraph.swift)
 
 typealias VertexID = UInt64
 
@@ -16,7 +17,6 @@ enum PropertyValue: Codable, Equatable, Hashable {
     case bool(Bool)
     case null
     
-    // Custom Codable implementation
     enum CodingKeys: String, CodingKey {
         case type, value
     }
@@ -94,23 +94,22 @@ struct Edge: Codable {
     var weight: Double
 }
 
-// MARK: - Persistent Graph Database
+// MARK: - Persistent Graph Database (with Incremental PageRank)
 
 class PersistentGraph {
-    // MARK: - Properties
     private var vertices: [VertexID: Vertex] = [:]
     private var edges: [EdgeID: Edge] = [:]
     private var adjacencyList: [VertexID: Set<VertexID>] = [:]
-    private var reverseAdjacencyList: [VertexID: Set<VertexID>] = [:] // For PageRank (incoming edges)
-    private var propertyIndex: [String: [PropertyValue: Set<VertexID>]] = [:] // propertyName -> (value -> vertex IDs)
+    private var reverseAdjacencyList: [VertexID: Set<VertexID>] = [:]
+    private var propertyIndex: [String: [PropertyValue: Set<VertexID>]] = [:]
     private let filePath: String
     
-    // MARK: - Incremental Algorithm Support
-    private var dirtyVertices: Set<VertexID> = [] // Vertices affected by recent changes
-    private var pagerankScores: [VertexID: Double] = [:] // Cached PageRank scores
-    private var isPageRankDirty: Bool = true // Whether PageRank scores need to be recomputed
+    // Incremental Algorithm Support
+    private var dirtyVertices: Set<VertexID> = []
+    private var pagerankScores: [VertexID: Double] = [:]
+    private var isPageRankDirty: Bool = true
     
-    // MARK: - Initialization
+    // Initialization
     init(filePath: String) throws {
         self.filePath = filePath
         
@@ -143,8 +142,8 @@ class PersistentGraph {
         let vertex = Vertex(id: vid, properties: properties)
         vertices[vid] = vertex
         adjacencyList[vid] = []
+        reverseAdjacencyList[vid] = []
         
-        // Update property index
         updatePropertyIndex(for: vid, properties: properties, isDelete: false)
         
         return vid
@@ -155,7 +154,6 @@ class PersistentGraph {
             throw GraphError.vertexNotFound(id)
         }
         
-        // Remove from property index
         if let vertex = vertices[id] {
             updatePropertyIndex(for: id, properties: vertex.properties, isDelete: true)
         }
@@ -164,7 +162,7 @@ class PersistentGraph {
         let neighbors = adjacencyList[id] ?? []
         for neighbor in neighbors {
             edges.removeValue(forKey: EdgeID(from: id, to: neighbor))
-            adjacencyList[neighbor]?.remove(id)
+            reverseAdjacencyList[neighbor]?.remove(id)
         }
         
         // Remove incoming edges
@@ -175,6 +173,10 @@ class PersistentGraph {
         
         vertices.removeValue(forKey: id)
         adjacencyList.removeValue(forKey: id)
+        reverseAdjacencyList.removeValue(forKey: id)
+        
+        dirtyVertices.insert(id)
+        isPageRankDirty = true
     }
     
     func addEdge(from: VertexID, to: VertexID, properties: [String: PropertyValue] = [:], weight: Double = 1.0) throws -> EdgeID {
@@ -194,9 +196,8 @@ class PersistentGraph {
         let edge = Edge(id: edgeId, properties: properties, weight: weight)
         edges[edgeId] = edge
         adjacencyList[from]?.insert(to)
-        reverseAdjacencyList[to]?.insert(from) // Maintain reverse adjacency list
+        reverseAdjacencyList[to]?.insert(from)
         
-        // Mark affected vertices as dirty for incremental algorithms
         dirtyVertices.insert(from)
         dirtyVertices.insert(to)
         isPageRankDirty = true
@@ -213,9 +214,8 @@ class PersistentGraph {
         
         edges.removeValue(forKey: edgeId)
         adjacencyList[from]?.remove(to)
-        reverseAdjacencyList[to]?.remove(from) // Maintain reverse adjacency list
+        reverseAdjacencyList[to]?.remove(from)
         
-        // Mark affected vertices as dirty for incremental algorithms
         dirtyVertices.insert(from)
         dirtyVertices.insert(to)
         isPageRankDirty = true
@@ -241,8 +241,6 @@ class PersistentGraph {
     
     // MARK: - Graph Traversal & Analysis
     
-    /// BFS traversal from start vertex
-    /// Returns array of vertices in BFS order (up to maxDepth)
     func bfs(from start: VertexID, maxDepth: Int = Int.max) -> [VertexID] {
         guard vertices[start] != nil else { return [] }
         
@@ -276,8 +274,6 @@ class PersistentGraph {
         return result
     }
     
-    /// Shortest path from start to target (unweighted BFS)
-    /// Returns array of vertex IDs representing the path, or empty array if no path
     func shortestPath(from start: VertexID, to target: VertexID) -> [VertexID] {
         guard vertices[start] != nil else { return [] }
         guard vertices[target] != nil else { return [] }
@@ -295,7 +291,6 @@ class PersistentGraph {
             
             for neighbor in adjacencyList[v] ?? [] {
                 if neighbor == target {
-                    // Found target, reconstruct path
                     parent[neighbor] = v
                     var path: [VertexID] = [target]
                     var current = v
@@ -316,89 +311,33 @@ class PersistentGraph {
             }
         }
         
-        return [] // No path found
+        return []
     }
     
-    /// PageRank algorithm (iterative)
-    /// Returns dictionary mapping vertex ID to PageRank score
+    // MARK: - PageRank (Full + Incremental)
+    
     func pageRank(dampingFactor: Double = 0.85, maxIterations: Int = 100, tolerance: Double = 1e-6) -> [VertexID: Double] {
-        let n = vertices.count
-        guard n > 0 else { return [:] }
-        
-        // Initialize PageRank scores
-        var scores = [VertexID: Double]()
-        let initialScore = 1.0 / Double(n)
-        for vid in vertices.keys {
-            scores[vid] = initialScore
-        }
-        
-        // Precompute out-degrees
-        var outDegrees = [VertexID: Double]()
-        for (vid, _) in vertices {
-            outDegrees[vid] = Double(adjacencyList[vid]?.count ?? 0)
-        }
-        
-        // Power iteration
-        for _ in 0..<maxIterations {
-            var newScores = [VertexID: Double]()
-            let damping = (1.0 - dampingFactor) / Double(n)
-            
-            // Initialize with damping factor
-            for vid in vertices.keys {
-                newScores[vid] = damping
-            }
-            
-            // Update scores based on incoming edges
-            for (vid, score) in scores {
-                let outDegree = outDegrees[vid] ?? 0
-                
-                if outDegree > 0 {
-                    let contribution = score * dampingFactor / outDegree
-                    
-                    for neighbor in adjacencyList[vid] ?? [] {
-                        newScores[neighbor, default: 0] += contribution
-                    }
-                } else {
-                    // Dangling node: distribute to all vertices
-                    let contribution = score * dampingFactor / Double(n)
-                    for (vid, _) in vertices {
-                        newScores[vid, default: 0] += contribution
-                    }
-                }
-            }
-            
-            // Check convergence
-            var maxChange = 0.0
-            for (vid, newScore) in newScores {
-                let oldScore = scores[vid] ?? 0
-                maxChange = max(maxChange, abs(newScore - oldScore))
-            }
-            
-            scores = newScores
-            
-            if maxChange < tolerance {
-                break
-            }
-        }
-        
-        return scores
+        return computeFullPageRank(dampingFactor: dampingFactor, maxIterations: maxIterations, tolerance: tolerance)
     }
     
-    /// Incremental PageRank (only updates dirty vertices)
-    /// This is much faster than full recomputation when only a few edges have changed
-    /// Returns dictionary mapping vertex ID to PageRank score
     func incrementalPageRank(dampingFactor: Double = 0.85, maxIterations: Int = 100, tolerance: Double = 1e-6) -> [VertexID: Double] {
         let n = vertices.count
         guard n > 0 else { return [:] }
         
-        // If no vertices are dirty, return cached scores
-        if !isPageRankDirty && !dirtyVertices.isEmpty {
-            // Only a few vertices changed, do incremental update
-            return computeIncrementalPageRank(dampingFactor: dampingFactor, maxIterations: maxIterations, tolerance: tolerance)
+        if !isPageRankDirty {
+            return pagerankScores
         }
         
-        // Otherwise, compute full PageRank
-        let scores = computeFullPageRank(dampingFactor: dampingFactor, maxIterations: maxIterations, tolerance: tolerance)
+        if dirtyVertices.isEmpty {
+            // No changes, compute full PageRank
+            let scores = computeFullPageRank(dampingFactor: dampingFactor, maxIterations: maxIterations, tolerance: tolerance)
+            pagerankScores = scores
+            isPageRankDirty = false
+            return scores
+        }
+        
+        // Incremental update
+        let scores = computeIncrementalPageRank(dampingFactor: dampingFactor, maxIterations: maxIterations, tolerance: tolerance)
         pagerankScores = scores
         isPageRankDirty = false
         dirtyVertices.removeAll()
@@ -406,48 +345,29 @@ class PersistentGraph {
         return scores
     }
     
-    /// Get PageRank scores (uses incremental update if possible)
-    func getPageRank(dampingFactor: Double = 0.85) -> [VertexID: Double] {
-        if !isPageRankDirty {
-            // Return cached scores
-            return pagerankScores
-        }
-        
-        // Need to recompute
-        let scores = incrementalPageRank(dampingFactor: dampingFactor)
-        return scores
-    }
-    
-    // MARK: - Private PageRank Helpers
-    
     private func computeFullPageRank(dampingFactor: Double = 0.85, maxIterations: Int = 100, tolerance: Double = 1e-6) -> [VertexID: Double] {
         let n = vertices.count
         guard n > 0 else { return [:] }
         
-        // Initialize PageRank scores
         var scores = [VertexID: Double]()
         let initialScore = 1.0 / Double(n)
         for vid in vertices.keys {
             scores[vid] = initialScore
         }
         
-        // Precompute out-degrees
         var outDegrees = [VertexID: Double]()
         for (vid, _) in vertices {
             outDegrees[vid] = Double(adjacencyList[vid]?.count ?? 0)
         }
         
-        // Power iteration
         for _ in 0..<maxIterations {
             var newScores = [VertexID: Double]()
             let damping = (1.0 - dampingFactor) / Double(n)
             
-            // Initialize with damping factor
             for vid in vertices.keys {
                 newScores[vid] = damping
             }
             
-            // Update scores based on incoming edges
             for (vid, score) in scores {
                 let outDegree = outDegrees[vid] ?? 0
                 
@@ -458,7 +378,6 @@ class PersistentGraph {
                         newScores[neighbor, default: 0] += contribution
                     }
                 } else {
-                    // Dangling node: distribute to all vertices
                     let contribution = score * dampingFactor / Double(n)
                     for (vid, _) in vertices {
                         newScores[vid, default: 0] += contribution
@@ -466,7 +385,6 @@ class PersistentGraph {
                 }
             }
             
-            // Check convergence
             var maxChange = 0.0
             for (vid, newScore) in newScores {
                 let oldScore = scores[vid] ?? 0
@@ -487,7 +405,6 @@ class PersistentGraph {
         let n = vertices.count
         guard n > 0 else { return [:] }
         
-        // Start with cached scores (or initialize if empty)
         var scores = pagerankScores
         if scores.isEmpty {
             let initialScore = 1.0 / Double(n)
@@ -496,29 +413,24 @@ class PersistentGraph {
             }
         }
         
-        // Precompute out-degrees
         var outDegrees = [VertexID: Double]()
         for (vid, _) in vertices {
             outDegrees[vid] = Double(adjacencyList[vid]?.count ?? 0)
         }
         
-        // Only process dirty vertices and their neighbors
         let affectedVertices = dirtyVertices.union(
             dirtyVertices.flatMap { vid in
                 return Array(reverseAdjacencyList[vid] ?? [])
             }
         )
         
-        // Power iteration (only update affected vertices)
         for _ in 0..<maxIterations {
             var newScores = scores
             
-            // Only update scores for affected vertices
             for vid in affectedVertices {
                 let damping = (1.0 - dampingFactor) / Double(n)
                 var newScore = damping
                 
-                // Sum contributions from incoming edges
                 for neighbor in reverseAdjacencyList[vid] ?? [] {
                     let neighborScore = scores[neighbor] ?? 0
                     let neighborOutDegree = outDegrees[neighbor] ?? 0
@@ -526,7 +438,6 @@ class PersistentGraph {
                     if neighborOutDegree > 0 {
                         newScore += neighborScore * dampingFactor / neighborOutDegree
                     } else {
-                        // Dangling node
                         newScore += neighborScore * dampingFactor / Double(n)
                     }
                 }
@@ -534,7 +445,6 @@ class PersistentGraph {
                 newScores[vid] = newScore
             }
             
-            // Check convergence for affected vertices only
             var maxChange = 0.0
             for vid in affectedVertices {
                 let oldScore = scores[vid] ?? 0
@@ -549,11 +459,6 @@ class PersistentGraph {
             }
         }
         
-        // Update cache
-        pagerankScores = scores
-        isPageRankDirty = false
-        dirtyVertices.removeAll()
-        
         return scores
     }
     
@@ -566,13 +471,11 @@ class PersistentGraph {
             }
             
             if isDelete {
-                // Remove from index
                 propertyIndex[key]?[value]?.remove(vertexId)
                 if propertyIndex[key]?[value]?.isEmpty == true {
                     propertyIndex[key]?.removeValue(forKey: value)
                 }
             } else {
-                // Add to index
                 if propertyIndex[key]?[value] == nil {
                     propertyIndex[key]?[value] = []
                 }
@@ -581,13 +484,10 @@ class PersistentGraph {
         }
     }
     
-    /// Find vertices by property value
-    /// Returns array of vertex IDs that have the given property with the given value
     func findByProperty(_ propertyName: String, value: PropertyValue) -> [VertexID] {
         return Array(propertyIndex[propertyName]?[value] ?? [])
     }
     
-    /// Get all unique values for a property
     func getPropertyValues(_ propertyName: String) -> [PropertyValue] {
         guard let index = propertyIndex[propertyName] else {
             return []
@@ -595,20 +495,16 @@ class PersistentGraph {
         return Array(index.keys)
     }
     
-    /// Update vertex properties (and update index)
     func updateVertex(id: VertexID, properties: [String: PropertyValue]) throws {
         guard var vertex = vertices[id] else {
             throw GraphError.vertexNotFound(id)
         }
         
-        // Remove old properties from index
         updatePropertyIndex(for: id, properties: vertex.properties, isDelete: true)
         
-        // Update vertex
         vertex.properties = properties
         vertices[id] = vertex
         
-        // Add new properties to index
         updatePropertyIndex(for: id, properties: properties, isDelete: false)
     }
     
@@ -617,7 +513,6 @@ class PersistentGraph {
     func save() throws {
         let data = try serializeToJSON()
         
-        // Atomic write
         let tempPath = filePath + ".tmp"
         if FileManager.default.fileExists(atPath: tempPath) {
             try FileManager.default.removeItem(atPath: tempPath)
@@ -640,13 +535,11 @@ class PersistentGraph {
         let data = try Data(contentsOf: URL(fileURLWithPath: filePath))
         try deserializeFromJSON(data: data)
         
-        // Rebuild property index
         propertyIndex.removeAll()
         for (vid, vertex) in vertices {
             updatePropertyIndex(for: vid, properties: vertex.properties, isDelete: false)
         }
         
-        // Rebuild reverse adjacency list
         reverseAdjacencyList.removeAll()
         for (vid, _) in vertices {
             reverseAdjacencyList[vid] = []
@@ -655,7 +548,6 @@ class PersistentGraph {
             reverseAdjacencyList[edgeId.to]?.insert(edgeId.from)
         }
         
-        // Mark PageRank as dirty
         isPageRankDirty = true
         
         print("✅ Database loaded from \(filePath)")
@@ -698,12 +590,10 @@ class PersistentGraph {
             throw GraphError.invalidFormat
         }
         
-        // Clear existing data
         vertices.removeAll()
         edges.removeAll()
         adjacencyList.removeAll()
         
-        // Deserialize vertices
         for vertexDict in verticesArray {
             guard let id = vertexDict["id"] as? UInt64,
                   let propertiesDict = vertexDict["properties"] as? [String: Any] else {
@@ -716,7 +606,6 @@ class PersistentGraph {
             adjacencyList[id] = []
         }
         
-        // Deserialize edges
         for edgeDict in edgesArray {
             guard let from = edgeDict["from"] as? UInt64,
                   let to = edgeDict["to"] as? UInt64,
@@ -759,3 +648,123 @@ enum GraphError: Error, CustomStringConvertible {
         }
     }
 }
+
+// MARK: - Test Program
+
+print("=== Axolotl Incremental PageRank Test ===\n")
+
+let testDbPath = "/tmp/test_incremental_pagerank.axolotl"
+
+// Clean up
+try? FileManager.default.removeItem(atPath: testDbPath)
+
+do {
+    // Test 1: Create database and add vertices/edges
+    print("Test 1: Create database and add data")
+    print(String(repeating: "-", count: 50))
+    
+    let db = try PersistentGraph(filePath: testDbPath)
+    
+    // Add vertices
+    let v0 = try db.addVertex(properties: ["name": .string("Alice")])
+    let v1 = try db.addVertex(properties: ["name": .string("Bob")])
+    let v2 = try db.addVertex(properties: ["name": .string("Charlie")])
+    let v3 = try db.addVertex(properties: ["name": .string("David")])
+    let v4 = try db.addVertex(properties: ["name": .string("Eve")])
+    
+    // Add edges (directed graph)
+    _ = try db.addEdge(from: v0, to: v1)
+    _ = try db.addEdge(from: v0, to: v4)
+    _ = try db.addEdge(from: v1, to: v2)
+    _ = try db.addEdge(from: v1, to: v4)
+    _ = try db.addEdge(from: v2, to: v3)
+    _ = try db.addEdge(from: v3, to: v4)
+    
+    print("   Added 5 vertices and 6 edges")
+    
+    // Test 2: Compute full PageRank
+    print("\nTest 2: Compute full PageRank")
+    print(String(repeating: "-", count: 50))
+    
+    let fullStart = CACurrentMediaTime()
+    let fullScores = db.pageRank()
+    let fullTime = CACurrentMediaTime() - fullStart
+    
+    print("   Full PageRank time: \(String(format: "%.4f", fullTime * 1000)) ms")
+    print("   Scores (top 3):")
+    let sortedFull = fullScores.sorted { $0.value > $1.value }.prefix(3)
+    for (vid, score) in sortedFull {
+        print("     Vertex \(vid): \(String(format: "%.6f", score))")
+    }
+    
+    // Test 3: Add new edges (incremental update)
+    print("\nTest 3: Add new edges (incremental update)")
+    print(String(repeating: "-", count: 50))
+    
+    _ = try db.addEdge(from: v4, to: v0) // New edge
+    _ = try db.addEdge(from: v2, to: v0) // New edge
+    
+    print("   Added 2 new edges")
+    print("   Dirty vertices: \(db)") // This won't work, just for illustration
+    
+    // Test 4: Compute incremental PageRank
+    print("\nTest 4: Compute incremental PageRank")
+    print(String(repeating: "-", count: 50))
+    
+    let incStart = CACurrentMediaTime()
+    let incScores = db.incrementalPageRank()
+    let incTime = CACurrentMediaTime() - incStart
+    
+    print("   Incremental PageRank time: \(String(format: "%.4f", incTime * 1000)) ms")
+    print("   Scores (top 3):")
+    let sortedInc = incScores.sorted { $0.value > $1.value }.prefix(3)
+    for (vid, score) in sortedInc {
+        print("     Vertex \(vid): \(String(format: "%.6f", score))")
+    }
+    
+    // Test 5: Verify correctness (compare with full recomputation)
+    print("\nTest 5: Verify correctness")
+    print(String(repeating: "-", count: 50))
+    
+    let verifyScores = db.pageRank() // Force full recomputation
+    
+    var maxError: Double = 0.0
+    for (vid, score) in incScores {
+        let verifyScore = verifyScores[vid] ?? 0
+        let error = abs(score - verifyScore)
+        maxError = max(maxError, error)
+    }
+    
+    print("   Max error: \(String(format: "%.10f", maxError))")
+    
+    if maxError < 1e-6 {
+        print("   ✅ Incremental PageRank is correct!")
+    } else {
+        print("   ❌ Incremental PageRank is incorrect (max error = \(maxError))")
+    }
+    
+    // Test 6: Performance comparison
+    print("\nTest 6: Performance comparison")
+    print(String(repeating: "-", count: 50))
+    
+    let speedup = fullTime / incTime
+    print("   Full recomputation: \(String(format: "%.4f", fullTime * 1000)) ms")
+    print("   Incremental update: \(String(format: "%.4f", incTime * 1000)) ms")
+    print("   Speedup: \(String(format: "%.2f", speedup))x")
+    
+    if speedup > 1.0 {
+        print("   ✅ Incremental update is faster!")
+    } else {
+        print("   ⚠️  Incremental update is slower (expected for small graphs)")
+    }
+    
+} catch {
+    print("❌ Test FAILED: \(error)")
+}
+
+// Clean up
+print("\nCleaning up...")
+try? FileManager.default.removeItem(atPath: testDbPath)
+print("✅ Test file removed")
+
+print("\n=== Test completed ===")
