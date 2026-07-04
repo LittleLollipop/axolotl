@@ -202,6 +202,35 @@ Apple M4's unified memory architecture (CPU/GPU share physical address space) en
 
 **Convergence criterion**: Max PageRank score change < 1e-6
 
+### Incremental BFS (CPU+GPU Collaborative)
+
+**Scenario**: Graph with 100K vertices, 500K edges. Add 1K new edges. Update BFS distances.
+
+| Method | Time (ms) | Iterations | Speedup | Result Match |
+|--------|-----------|------------|---------|---------------|
+| Full BFS | 151.47 | 1 | 1.00x | - |
+| Incremental BFS | 1.89 | 1 | **80x** | ✅ 100% |
+
+### Incremental SSSP (CPU+GPU Collaborative)
+
+**Scenario**: Graph with 100K vertices, 500K edges (weighted). Add 1K new edges. Update shortest paths.
+
+| Method | Time (ms) | Iterations | Speedup | Result Match |
+|--------|-----------|------------|---------|---------------|
+| Full SSSP (16 iter) | 180.16 | 16 | 1.00x | - |
+| Incremental SSSP | 2.15 | 1 | **84x** | ✅ 100% |
+
+### Incremental Connected Components (Union-Find)
+
+**Scenario**: Graph with 100K vertices, 500K edges. Add 5K new edges. Update connected components.
+
+| Method | Time (ms) | Edges Processed | Speedup | Result Match |
+|--------|-----------|------------------|---------|---------------|
+| Full build (all edges) | 51.89 | 499,971 | 1.00x | - |
+| Incremental update (new edges only) | 0.70 | 5,000 | **74x** | ✅ 100% |
+
+**Why Union-Find?** Union-Find operations (find/union) are extremely fast: O(α(V)) ≈ O(1) amortized. Path compression + union by rank = nearly constant time.
+
 ---
 
 ## Installation
