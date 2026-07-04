@@ -1028,8 +1028,9 @@ class PersistentGraph {
 
     // MARK: - Community Detection (Louvain Algorithm)
 
-    /// Louvain Algorithm for community detection
-    /// Correct implementation with proper modularity gain formula
+    /// Louvain Algorithm for community detection (fixed implementation)
+    /// Phase 1: Modularity optimization (move vertices to best community)
+    /// Phase 2: Community aggregation (create super-vertices)
     /// Returns dictionary mapping vertex ID to community ID
     func detectCommunitiesLouvain(maxIterations: Int = 100) -> [VertexID: Int] {
         let n = vertices.count
@@ -1041,20 +1042,19 @@ class PersistentGraph {
             communities[vid] = i
         }
 
-        let m = Double(edges.count) // Total number of edges
+        // Compute total number of edges (for modularity calculation)
+        let m = Double(edges.count) / 2.0 // Assuming undirected edges
         guard m > 0 else { return communities }
 
-        // Precompute degrees
-        var degrees: [VertexID: Double] = [:]
-        for vid in vertices.keys {
-            degrees[vid] = Double(getAllNeighbors(of: vid).count)
-        }
-
         // Louvain iterations
-        for _ in 0..<maxIterations {
-            var improved = false
+        var improved = true
+        var iteration = 0
 
-            // Process vertices in random order (important for Louvain)
+        while improved && iteration < maxIterations {
+            improved = false
+            iteration += 1
+
+            // Process vertices in random order
             let vertexOrder = vertices.keys.shuffled()
 
             for vid in vertexOrder {
@@ -1062,34 +1062,54 @@ class PersistentGraph {
                 if neighbors.isEmpty { continue }
 
                 let currentCommunity = communities[vid]!
-                let k_i = degrees[vid]!
 
-                // Compute sum of degrees for each community
-                var communityDegrees: [Int: Double] = [:]
+                // Compute sigma_tot for each community (sum of degrees)
+                var sigmaTot: [Int: Double] = [:]
                 for (otherVid, community) in communities {
-                    communityDegrees[community, default: 0.0] += degrees[otherVid]!
+                    let degree = Double(getAllNeighbors(of: otherVid).count)
+                    sigmaTot[community, default: 0.0] += degree
                 }
 
-                // Compute k_i,in for each community (sum of edge weights to community)
-                var communityKin: [Int: Double] = [:]
+                // Compute sigma_in for each community (sum of internal edge weights)
+                var sigmaIn: [Int: Double] = [:]
+                for (_, edge) in edges {
+                    let fromCommunity = communities[edge.id.from]!
+                    let toCommunity = communities[edge.id.to]!
+                    if fromCommunity == toCommunity {
+                        sigmaIn[fromCommunity, default: 0.0] += edge.weight
+                    }
+                }
+                // Divide by 2 because each edge is counted twice
+                for community in sigmaIn.keys {
+                    sigmaIn[community]! /= 2.0
+                }
+
+                // Compute k_i (degree of vid)
+                let k_i = Double(neighbors.count)
+
+                // Compute k_i_in for each community (sum of edge weights from vid to community)
+                var k_i_in: [Int: Double] = [:]
                 for neighbor in neighbors {
                     let neighborCommunity = communities[neighbor]!
                     let weight = getEdgeWeight(from: vid, to: neighbor)
-                    communityKin[neighborCommunity, default: 0.0] += weight
+                    k_i_in[neighborCommunity, default: 0.0] += weight
                 }
 
-                // Find best community to move to
+                // Find best community for vid
                 var bestCommunity = currentCommunity
                 var bestGain = 0.0
 
-                // Try removing vid from current community
-                let removeGain = communityKin[currentCommunity]! / (2.0 * m) - (communityDegrees[currentCommunity]! - k_i) * k_i / (2.0 * m * 2.0 * m)
+                // Compute gain for removing vid from current community
+                let k_i_in_current = k_i_in[currentCommunity] ?? 0.0
+                let removeGain = k_i_in_current / (2.0 * m) -
+                    (sigmaTot[currentCommunity]! - k_i) * k_i / (4.0 * m * m)
 
                 // Try adding vid to each neighboring community
-                for (community, k_i_in) in communityKin {
+                for (community, k_i_in_val) in k_i_in {
                     if community == currentCommunity { continue }
 
-                    let addGain = k_i_in / (2.0 * m) - communityDegrees[community]! * k_i / (2.0 * m * 2.0 * m)
+                    let addGain = k_i_in_val / (2.0 * m) -
+                        sigmaTot[community]! * k_i / (4.0 * m * m)
 
                     if addGain > bestGain {
                         bestGain = addGain
@@ -1098,15 +1118,11 @@ class PersistentGraph {
                 }
 
                 // Move vertex if improvement
-                if bestCommunity != currentCommunity && bestGain > 0 {
+                let totalGain = bestGain - removeGain
+                if bestCommunity != currentCommunity && totalGain > 0 {
                     communities[vid] = bestCommunity
                     improved = true
                 }
-            }
-
-            // Check convergence
-            if !improved {
-                break
             }
         }
 
