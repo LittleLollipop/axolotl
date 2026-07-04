@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Core Types
+// MARK: - Type Definitions (Must match PersistentGraph.swift)
 
 typealias VertexID = UInt64
 
@@ -16,7 +16,6 @@ enum PropertyValue: Codable, Equatable, Hashable {
     case bool(Bool)
     case null
     
-    // Custom Codable implementation
     enum CodingKeys: String, CodingKey {
         case type, value
     }
@@ -94,16 +93,37 @@ struct Edge: Codable {
     var weight: Double
 }
 
+enum GraphError: Error, CustomStringConvertible {
+    case vertexNotFound(VertexID)
+    case edgeNotFound(VertexID, VertexID)
+    case vertexAlreadyExists(VertexID)
+    case edgeAlreadyExists(VertexID, VertexID)
+    case invalidFormat
+    
+    var description: String {
+        switch self {
+        case .vertexNotFound(let id):
+            return "Vertex \(id) not found"
+        case .edgeNotFound(let from, let to):
+            return "Edge (\(from) -> \(to)) not found"
+        case .vertexAlreadyExists(let id):
+            return "Vertex \(id) already exists"
+        case .edgeAlreadyExists(let from, let to):
+            return "Edge (\(from) -> \(to)) already exists"
+        case .invalidFormat:
+            return "Invalid file format"
+        }
+    }
+}
+
 // MARK: - Persistent Graph Database
 
 class PersistentGraph {
-    // MARK: - Properties
     private var vertices: [VertexID: Vertex] = [:]
     private var edges: [EdgeID: Edge] = [:]
     private var adjacencyList: [VertexID: Set<VertexID>] = [:]
     private let filePath: String
     
-    // MARK: - Initialization
     init(filePath: String) throws {
         self.filePath = filePath
         
@@ -114,8 +134,6 @@ class PersistentGraph {
             try load()
         }
     }
-    
-    // MARK: - CRUD Operations
     
     func addVertex(id: VertexID? = nil, properties: [String: PropertyValue] = [:]) throws -> VertexID {
         let vid = id ?? VertexID(vertices.count)
@@ -136,14 +154,12 @@ class PersistentGraph {
             throw GraphError.vertexNotFound(id)
         }
         
-        // Remove all connected edges
         let neighbors = adjacencyList[id] ?? []
         for neighbor in neighbors {
             edges.removeValue(forKey: EdgeID(from: id, to: neighbor))
             adjacencyList[neighbor]?.remove(id)
         }
         
-        // Remove incoming edges
         for (vid, _) in vertices {
             edges.removeValue(forKey: EdgeID(from: vid, to: id))
             adjacencyList[vid]?.remove(id)
@@ -185,8 +201,6 @@ class PersistentGraph {
         adjacencyList[from]?.remove(to)
     }
     
-    // MARK: - Query Operations
-    
     func getVertex(id: VertexID) -> Vertex? {
         return vertices[id]
     }
@@ -203,12 +217,9 @@ class PersistentGraph {
         return (vertices.count, edges.count)
     }
     
-    // MARK: - Persistence (JSON format)
-    
     func save() throws {
         let data = try serializeToJSON()
         
-        // Atomic write
         let tempPath = filePath + ".tmp"
         if FileManager.default.fileExists(atPath: tempPath) {
             try FileManager.default.removeItem(atPath: tempPath)
@@ -271,12 +282,10 @@ class PersistentGraph {
             throw GraphError.invalidFormat
         }
         
-        // Clear existing data
         vertices.removeAll()
         edges.removeAll()
         adjacencyList.removeAll()
         
-        // Deserialize vertices
         for vertexDict in verticesArray {
             guard let id = vertexDict["id"] as? UInt64,
                   let propertiesDict = vertexDict["properties"] as? [String: Any] else {
@@ -289,7 +298,6 @@ class PersistentGraph {
             adjacencyList[id] = []
         }
         
-        // Deserialize edges
         for edgeDict in edgesArray {
             guard let from = edgeDict["from"] as? UInt64,
                   let to = edgeDict["to"] as? UInt64,
@@ -308,27 +316,134 @@ class PersistentGraph {
     }
 }
 
-// MARK: - Graph Error
+// MARK: - Test Program
 
-enum GraphError: Error, CustomStringConvertible {
-    case vertexNotFound(VertexID)
-    case edgeNotFound(VertexID, VertexID)
-    case vertexAlreadyExists(VertexID)
-    case edgeAlreadyExists(VertexID, VertexID)
-    case invalidFormat
+print("=== Axolotl Graph Database Test ===\n")
+
+let testDbPath = "/tmp/test_graph.axolotl"
+
+// Test 1: Create database and add data
+print("Test 1: Create database and add data")
+print(String(repeating: "-", count: 50))
+
+do {
+    let db = try PersistentGraph(filePath: testDbPath)
     
-    var description: String {
-        switch self {
-        case .vertexNotFound(let id):
-            return "Vertex \(id) not found"
-        case .edgeNotFound(let from, let to):
-            return "Edge (\(from) -> \(to)) not found"
-        case .vertexAlreadyExists(let id):
-            return "Vertex \(id) already exists"
-        case .edgeAlreadyExists(let from, let to):
-            return "Edge (\(from) -> \(to)) already exists"
-        case .invalidFormat:
-            return "Invalid file format"
-        }
-    }
+    // Add vertices
+    print("\n1. Adding vertices...")
+    let v1 = try db.addVertex(properties: ["name": .string("Alice"), "age": .int(30)])
+    let v2 = try db.addVertex(properties: ["name": .string("Bob"), "age": .int(25)])
+    let v3 = try db.addVertex(properties: ["name": .string("Charlie"), "age": .int(35)])
+    let v4 = try db.addVertex(properties: ["name": .string("David"), "age": .int(40)])
+    let v5 = try db.addVertex(properties: ["name": .string("Eve"), "age": .int(28)])
+    
+    print("   Added 5 vertices (IDs: \(v1)-\(v5))")
+    
+    // Add edges
+    print("\n2. Adding edges...")
+    _ = try db.addEdge(from: v1, to: v2, properties: ["type": .string("knows")])
+    _ = try db.addEdge(from: v1, to: v5, properties: ["type": .string("knows")])
+    _ = try db.addEdge(from: v2, to: v3, properties: ["type": .string("knows")])
+    _ = try db.addEdge(from: v3, to: v4, properties: ["type": .string("knows")])
+    _ = try db.addEdge(from: v4, to: v5, properties: ["type": .string("knows")])
+    
+    print("   Added 5 edges")
+    
+    // Show statistics
+    let stats = db.getStatistics()
+    print("\n3. Graph statistics:")
+    print("   Vertices: \(stats.vertexCount)")
+    print("   Edges: \(stats.edgeCount)")
+    
+    // Save to disk
+    print("\n4. Saving to disk...")
+    try db.save()
+    
+    print("\n✅ Test 1 PASSED\n")
+    
+} catch {
+    print("❌ Test 1 FAILED: \(error)")
 }
+
+// Test 2: Load database from disk
+print("Test 2: Load database from disk")
+print(String(repeating: "-", count: 50))
+
+do {
+    let db = try PersistentGraph(filePath: testDbPath)
+    
+    // Check statistics
+    let stats = db.getStatistics()
+    print("\n1. Loaded graph statistics:")
+    print("   Vertices: \(stats.vertexCount)")
+    print("   Edges: \(stats.edgeCount)")
+    
+    // Verify data
+    print("\n2. Verifying data...")
+    
+    // Check vertex 0
+    if let v0 = db.getVertex(id: 0) {
+        print("   Vertex 0: \(v0.properties["name"] ?? .null)")
+    } else {
+        print("   ❌ Vertex 0 not found")
+    }
+    
+    // Check edge (0, 1)
+    if let e01 = db.getEdge(from: 0, to: 1) {
+        print("   Edge (0 -> 1): \(e01.properties["type"] ?? .null)")
+    } else {
+        print("   ❌ Edge (0 -> 1) not found")
+    }
+    
+    // Check neighbors of vertex 0
+    let neighbors = db.getNeighbors(of: 0)
+    print("\n3. Neighbors of vertex 0: \(neighbors)")
+    
+    print("\n✅ Test 2 PASSED\n")
+    
+} catch {
+    print("❌ Test 2 FAILED: \(error)")
+}
+
+// Test 3: Incremental changes and save
+print("Test 3: Incremental changes and save")
+print(String(repeating: "-", count: 50))
+
+do {
+    let db = try PersistentGraph(filePath: testDbPath)
+    
+    // Add more vertices and edges
+    print("\n1. Adding more data...")
+    let v6 = try db.addVertex(properties: ["name": .string("Frank"), "age": .int(32)])
+    _ = try db.addEdge(from: v6, to: 0, properties: ["type": .string("knows")])
+    
+    print("   Added vertex 6 (Frank)")
+    print("   Added edge (6 -> 0)")
+    
+    // Save
+    print("\n2. Saving to disk...")
+    try db.save()
+    
+    // Reload and verify
+    print("\n3. Reloading and verifying...")
+    let db2 = try PersistentGraph(filePath: testDbPath)
+    let stats = db2.getStatistics()
+    print("   Vertices: \(stats.vertexCount) (expected: 6)")
+    print("   Edges: \(stats.edgeCount) (expected: 6)")
+    
+    if stats.vertexCount == 6 && stats.edgeCount == 6 {
+        print("\n✅ Test 3 PASSED\n")
+    } else {
+        print("\n❌ Test 3 FAILED: Data mismatch\n")
+    }
+    
+} catch {
+    print("❌ Test 3 FAILED: \(error)")
+}
+
+// Cleanup
+print("Cleaning up...")
+try? FileManager.default.removeItem(atPath: testDbPath)
+print("✅ Test file removed\n")
+
+print("=== All tests completed ===")
