@@ -231,6 +231,27 @@ Apple M4's unified memory architecture (CPU/GPU share physical address space) en
 
 **Why Union-Find?** Union-Find operations (find/union) are extremely fast: O(α(V)) ≈ O(1) amortized. Path compression + union by rank = nearly constant time.
 
+### Incremental Triangle Counting (Adjacency Sets)
+
+**Scenario**: Graph with 10K vertices, 50K edges. Add 100 new edges. Count new triangles.
+
+| Method | Time (ms) | Edges Processed | Speedup | Result Match |
+|--------|-----------|------------------|---------|---------------|
+| Full counting (all edges) | 12.86 | 50,100 | 1.00x | - |
+| Incremental update (new edges only) | 0.0265 | 100 | **486x** | ✅ 100% |
+
+**Why Triangle Counting is Naturally Incremental?**
+
+1. **Triangle is edge-centric** - Each triangle is counted exactly once (via one of its edges)
+2. **Adding an edge only creates triangles involving that edge** - No need to check all triangles
+3. **Adjacency sets accelerate common neighbor queries** - Set intersection is O(min(|S1|, |S2|))
+
+**Applications**:
+- **Clustering Coefficient**: Measures how tightly connected a vertex's neighbors are
+- **Social Network Analysis**: "Friend of friend" relationships
+- **Link Prediction**: Vertices sharing many triangles are likely to form new edges
+- **Graph Clustering**: Triangles indicate community structure
+
 ---
 
 ## Installation

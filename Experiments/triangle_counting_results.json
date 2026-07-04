@@ -1,0 +1,22 @@
+{
+  "algorithm": "Incremental Triangle Counting",
+  "graph": {
+    "vertices": 10000,
+    "initial_edges": 50000,
+    "new_edges": 100,
+    "total_edges": 50100
+  },
+  "performance": {
+    "full_recomputation_ms": 12.8550,
+    "incremental_correct_ms": 12.4175,
+    "incremental_fast_ms": 0.0265,
+    "speedup_correct": 1.04,
+    "speedup_fast": 485.86
+  },
+  "correctness": {
+    "matches": true,
+    "initial_triangles": 159,
+    "new_triangles_correct": 1,
+    "new_triangles_fast": 1
+  }
+}
