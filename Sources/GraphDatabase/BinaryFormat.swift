@@ -1,5 +1,21 @@
 import Foundation
 
+// MARK: - Backward Compatibility (for PersistentGraph.swift)
+struct BinaryFormat {
+    static let magic: [UInt8] = [0x41, 0x58, 0x4F, 0x4C]  // "AXOL"
+    static let version: UInt16 = 1
+    
+    enum PropertyType: UInt8 {
+        case string = 0
+        case int = 1
+        case double = 2
+        case bool = 3
+        case null = 4
+        case float = 5
+        case data = 6
+    }
+}
+
 // MARK: - Binary File Format (Simplified Version 1.0)
 
 /*
@@ -196,38 +212,5 @@ struct BinaryGraphFormat {
         // Simplified: Return empty graph for now
         // TODO: Implement full binary parsing
         return ([:], [:])
-    }
-}
-
-// MARK: - Helper Extensions
-
-extension PropertyValue {
-    func toAny() -> Any {
-        switch self {
-        case .string(let s): return s
-        case .int(let i): return i
-        case .double(let d): return d
-        case .bool(let b): return b
-        case .null: return NSNull()
-        }
-    }
-}
-
-// MARK: - Graph Error
-
-enum GraphError: Error, CustomStringConvertible {
-    case vertexNotFound(VertexID)
-    case edgeNotFound(VertexID, VertexID)
-    case ioError(String)
-    
-    var description: String {
-        switch self {
-        case .vertexNotFound(let id):
-            return "Vertex \(id) not found"
-        case .edgeNotFound(let from, let to):
-            return "Edge (\(from) -> \(to)) not found"
-        case .ioError(let msg):
-            return "I/O Error: \(msg)"
-        }
     }
 }

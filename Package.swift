@@ -18,5 +18,8 @@ let package = Package(
         .testTarget(
             name: "GraphDatabaseTests",
             dependencies: ["GraphDatabase"]),
+        .executableTarget(
+            name: "Examples",
+            dependencies: ["GraphDatabase"]),
     ]
 )

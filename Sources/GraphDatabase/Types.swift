@@ -11,7 +11,15 @@ import Foundation
 public typealias VertexID = UInt64
 
 /// Edge ID (pair of vertex IDs)
-public typealias EdgeID = (from: VertexID, to: VertexID)
+public struct EdgeID: Hashable, Codable {
+    public let from: VertexID
+    public let to: VertexID
+    
+    public init(from: VertexID, to: VertexID) {
+        self.from = from
+        self.to = to
+    }
+}
 
 // MARK: - Data Models
 
@@ -31,17 +39,25 @@ public struct Edge: Codable, Equatable, Hashable {
     public let from: VertexID
     public let to: VertexID
     public var properties: [String: PropertyValue]
-    public var weight: Float
+    public var weight: Double
     
-    public init(from: VertexID, to: VertexID, properties: [String: PropertyValue] = [:], weight: Float = 1.0) {
+    public init(from: VertexID, to: VertexID, properties: [String: PropertyValue] = [:], weight: Double = 1.0) {
         self.from = from
         self.to = to
         self.properties = properties
         self.weight = weight
     }
     
+    // Backward compatibility initializer (accepts id parameter)
+    public init(id: EdgeID, properties: [String: PropertyValue] = [:], weight: Double = 1.0) {
+        self.from = id.from
+        self.to = id.to
+        self.properties = properties
+        self.weight = weight
+    }
+    
     public var id: EdgeID {
-        return (from, to)
+        return EdgeID(from: from, to: to)
     }
 }
 
@@ -53,6 +69,7 @@ public enum PropertyValue: Codable, Equatable, Hashable {
     case bool(Bool)
     case float(Float)
     case data(Data)
+    case null
     
     // Codable implementation
     enum CodingKeys: String, CodingKey {
@@ -80,6 +97,9 @@ public enum PropertyValue: Codable, Equatable, Hashable {
         case .data(let value):
             try container.encode("data", forKey: .type)
             try container.encode(value, forKey: .value)
+        case .null:
+            try container.encode("null", forKey: .type)
+            try container.encodeNil(forKey: .value)
         }
     }
     
@@ -99,8 +119,48 @@ public enum PropertyValue: Codable, Equatable, Hashable {
             self = .float(try container.decode(Float.self, forKey: .value))
         case "data":
             self = .data(try container.decode(Data.self, forKey: .value))
+        case "null":
+            self = .null
         default:
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: [], debugDescription: "Unknown type: \(type)"))
+        }
+    }
+    
+    /// Convert to Any type (for interoperability)
+    public func toAny() -> Any {
+        switch self {
+        case .string(let s): return s
+        case .int(let i): return i
+        case .double(let d): return d
+        case .bool(let b): return b
+        case .float(let f): return f
+        case .data(let d): return d
+        case .null: return NSNull()
+        }
+    }
+    
+    /// Create from Any type (for interoperability)
+    public static func fromAny(_ any: Any) -> PropertyValue {
+        if let s = any as? String { return .string(s) }
+        if let i = any as? Int { return .int(i) }
+        if let d = any as? Double { return .double(d) }
+        if let f = any as? Float { return .float(f) }
+        if let b = any as? Bool { return .bool(b) }
+        if let data = any as? Data { return .data(data) }
+        if any is NSNull { return .null }
+        return .string("\(any)")
+    }
+    
+    /// Description (for debugging and display)
+    public var description: String {
+        switch self {
+        case .string(let s): return "\"\(s)\""
+        case .int(let i): return "\(i)"
+        case .double(let d): return "\(d)"
+        case .bool(let b): return "\(b)"
+        case .float(let f): return "\(f)"
+        case .data(let d): return "Data(\(d.count) bytes)"
+        case .null: return "null"
         }
     }
 }
@@ -114,6 +174,8 @@ public enum GraphError: Error, LocalizedError {
     case vertexAlreadyExists(VertexID)
     case edgeAlreadyExists(VertexID, VertexID)
     case invalidOperation(String)
+    case invalidFormat
+    case ioError(String)
     
     public var errorDescription: String? {
         switch self {
@@ -127,6 +189,10 @@ public enum GraphError: Error, LocalizedError {
             return "Edge (\(from), \(to)) already exists"
         case .invalidOperation(let msg):
             return "Invalid operation: \(msg)"
+        case .invalidFormat:
+            return "Invalid file format"
+        case .ioError(let msg):
+            return "I/O Error: \(msg)"
         }
     }
 }

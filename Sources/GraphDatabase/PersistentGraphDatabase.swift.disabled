@@ -278,26 +278,3 @@ class PersistentGraphDatabase {
         return isDirty
     }
 }
-
-// MARK: - Helper Extensions
-
-extension PropertyValue {
-    func toAny() -> Any {
-        switch self {
-        case .string(let s): return s
-        case .int(let i): return i
-        case .double(let d): return d
-        case .bool(let b): return b
-        case .null: return NSNull()
-        }
-    }
-    
-    static func fromAny(_ any: Any) -> PropertyValue {
-        if let s = any as? String { return .string(s) }
-        if let i = any as? Int { return .int(i) }
-        if let d = any as? Double { return .double(d) }
-        if let b = any as? Bool { return .bool(b) }
-        if any is NSNull { return .null }
-        return .null
-    }
-}

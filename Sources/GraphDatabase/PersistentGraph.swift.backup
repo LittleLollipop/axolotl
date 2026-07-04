@@ -66,7 +66,7 @@ public class PersistentGraph {
 
     // MARK: - CRUD Operations
 
-    public func addVertex(id: VertexID? = nil, properties: [String: PropertyValue] = [:]) throws -> VertexID {
+    func addVertex(id: VertexID? = nil, properties: [String: PropertyValue] = [:]) throws -> VertexID {
         let vid = id ?? VertexID(vertices.count)
 
         guard vertices[vid] == nil else {
@@ -83,7 +83,7 @@ public class PersistentGraph {
         return vid
     }
 
-    public func deleteVertex(id: VertexID) throws {
+    func deleteVertex(id: VertexID) throws {
         guard vertices[id] != nil else {
             throw GraphError.vertexNotFound(id)
         }
@@ -110,7 +110,7 @@ public class PersistentGraph {
         adjacencyList.removeValue(forKey: id)
     }
 
-    public func addEdge(from: VertexID, to: VertexID, properties: [String: PropertyValue] = [:], weight: Double = 1.0) throws -> EdgeID {
+    func addEdge(from: VertexID, to: VertexID, properties: [String: PropertyValue] = [:], weight: Double = 1.0) throws -> EdgeID {
         guard vertices[from] != nil else {
             throw GraphError.vertexNotFound(from)
         }
@@ -147,7 +147,7 @@ public class PersistentGraph {
         return edgeId
     }
 
-    public func deleteEdge(from: VertexID, to: VertexID) throws {
+    func deleteEdge(from: VertexID, to: VertexID) throws {
         let edgeId = EdgeID(from: from, to: to)
 
         guard edges[edgeId] != nil else {
@@ -188,7 +188,7 @@ public class PersistentGraph {
         return Array(adjacencyList[vertexId] ?? [])
     }
 
-    public func getStatistics() -> (vertexCount: Int, edgeCount: Int) {
+    func getStatistics() -> (vertexCount: Int, edgeCount: Int) {
         return (vertices.count, edges.count)
     }
 
@@ -196,7 +196,7 @@ public class PersistentGraph {
 
     /// BFS traversal from start vertex
     /// Returns array of vertices in BFS order (up to maxDepth)
-    public func bfs(from start: VertexID, maxDepth: Int = Int.max) -> [VertexID] {
+    func bfs(from start: VertexID, maxDepth: Int = Int.max) -> [VertexID] {
         let distances = bfsDistances(from: start)
 
         // Sort by distance, then by vertex ID for determinism
@@ -212,7 +212,7 @@ public class PersistentGraph {
 
     /// Shortest path from start to target (unweighted BFS)
     /// Returns array of vertex IDs representing the path, or empty array if no path
-    public func shortestPath(from start: VertexID, to target: VertexID) -> [VertexID] {
+    func shortestPath(from start: VertexID, to target: VertexID) -> [VertexID] {
         guard vertices[start] != nil else { return [] }
         guard vertices[target] != nil else { return [] }
 
@@ -255,7 +255,7 @@ public class PersistentGraph {
 
     /// Incremental BFS (uses cache when possible)
     /// Returns dictionary mapping vertex ID to distance from start
-    public func bfsDistances(from start: VertexID) -> [VertexID: Int] {
+    func bfsDistances(from start: VertexID) -> [VertexID: Int] {
         guard vertices[start] != nil else { return [:] }
 
         // Check if cache is valid
@@ -329,7 +329,7 @@ public class PersistentGraph {
     // MARK: - Incremental SSSP (Shortest Path)
 
     /// Get SSSP distances (uses incremental update if possible)
-    public func sssp(from start: VertexID) -> [VertexID: Int] {
+    func sssp(from start: VertexID) -> [VertexID: Int] {
         guard vertices[start] != nil else { return [:] }
 
         // Check if cache is valid
@@ -363,7 +363,7 @@ public class PersistentGraph {
 
     /// Get weakly connected components (uses incremental update if possible)
     /// Weakly connected components ignore edge direction
-    public func connectedComponents() -> [Set<VertexID>] {
+    func connectedComponents() -> [Set<VertexID>] {
         if !isConnectedComponentsDirty {
             return connectedComponentsCache
         }
@@ -376,7 +376,7 @@ public class PersistentGraph {
     }
 
     /// Compute weakly connected components (ignore edge direction)
-    public func computeWeaklyConnectedComponents() -> [Set<VertexID>] {
+    private func computeWeaklyConnectedComponents() -> [Set<VertexID>] {
         var visited = Set<VertexID>()
         var components: [Set<VertexID>] = []
 
@@ -421,7 +421,7 @@ public class PersistentGraph {
 
     /// Get triangle count (uses incremental update if possible)
     /// Counts undirected triangles (ignores edge direction)
-    public func triangleCount() -> Int {
+    func triangleCount() -> Int {
         if !isTriangleCountDirty {
             return triangleCountCache
         }
@@ -475,7 +475,7 @@ public class PersistentGraph {
 
     /// PageRank algorithm (iterative)
     /// Returns dictionary mapping vertex ID to PageRank score
-    public func pageRank(dampingFactor: Double = 0.85, maxIterations: Int = 100, tolerance: Double = 1e-6) -> [VertexID: Double] {
+    func pageRank(dampingFactor: Double = 0.85, maxIterations: Int = 100, tolerance: Double = 1e-6) -> [VertexID: Double] {
         let n = vertices.count
         guard n > 0 else { return [:] }
 
@@ -541,7 +541,7 @@ public class PersistentGraph {
     /// Incremental PageRank (only updates dirty vertices)
     /// This is much faster than full recomputation when only a few edges have changed
     /// Returns dictionary mapping vertex ID to PageRank score
-    public func incrementalPageRank(dampingFactor: Double = 0.85, maxIterations: Int = 100, tolerance: Double = 1e-6) -> [VertexID: Double] {
+    func incrementalPageRank(dampingFactor: Double = 0.85, maxIterations: Int = 100, tolerance: Double = 1e-6) -> [VertexID: Double] {
         let n = vertices.count
         guard n > 0 else { return [:] }
 
@@ -561,7 +561,7 @@ public class PersistentGraph {
     }
 
     /// Get PageRank scores (uses incremental update if possible)
-    public func getPageRank(dampingFactor: Double = 0.85) -> [VertexID: Double] {
+    func getPageRank(dampingFactor: Double = 0.85) -> [VertexID: Double] {
         if !isPageRankDirty {
             // Return cached scores
             return pagerankScores
@@ -716,7 +716,7 @@ public class PersistentGraph {
     /// Betweenness Centrality algorithm (BFS-based for unweighted graphs)
     /// Measures how often a vertex appears on shortest paths between other vertices
     /// Returns dictionary mapping vertex ID to betweenness centrality score
-    public func betweennessCentrality() -> [VertexID: Double] {
+    func betweennessCentrality() -> [VertexID: Double] {
         let n = vertices.count
         guard n > 2 else { return [:] }
 
@@ -808,7 +808,7 @@ public class PersistentGraph {
     }
 
     /// Get Betweenness Centrality scores (uses cache if possible)
-    public func getBetweennessCentrality() -> [VertexID: Double] {
+    func getBetweennessCentrality() -> [VertexID: Double] {
         if !isBetweennessDirty {
             return betweennessScores
         }
@@ -821,7 +821,7 @@ public class PersistentGraph {
     /// Greedy Modularity Optimization for community detection
     /// Starts with each vertex as its own community, then iteratively merges communities
     /// Returns dictionary mapping vertex ID to community ID
-    public func detectCommunitiesGreedy(maxIterations: Int = 100) -> [VertexID: Int] {
+    func detectCommunitiesGreedy(maxIterations: Int = 100) -> [VertexID: Int] {
         let n = vertices.count
         guard n > 0 else { return [:] }
 
@@ -921,7 +921,7 @@ public class PersistentGraph {
     }
 
     /// Get communities (grouped by label) using greedy optimization
-    public func getCommunitiesGreedy(maxIterations: Int = 100) -> [[VertexID]] {
+    func getCommunitiesGreedy(maxIterations: Int = 100) -> [[VertexID]] {
         let communities = detectCommunitiesGreedy(maxIterations: maxIterations)
 
         // Group vertices by community
@@ -942,7 +942,7 @@ public class PersistentGraph {
     ///     - resolution > 1: Prefer smaller communities
     ///     - resolution < 1: Prefer larger communities (helps with star graphs)
     /// - Returns: Dictionary mapping vertex ID to community ID
-    public func detectCommunitiesLouvain(maxIterations: Int = 100, resolution: Double = 1.0) -> [VertexID: Int] {
+    func detectCommunitiesLouvain(maxIterations: Int = 100, resolution: Double = 1.0) -> [VertexID: Int] {
         let n = vertices.count
         guard n > 0 else { return [:] }
 
@@ -1041,7 +1041,7 @@ public class PersistentGraph {
     }
 
     /// Get all neighbors (both outgoing and incoming edges)
-    public func getAllNeighbors(of vertex: VertexID) -> Set<VertexID> {
+    func getAllNeighbors(of vertex: VertexID) -> Set<VertexID> {
         var neighbors: Set<VertexID> = []
         if let outgoing = adjacencyList[vertex] {
             neighbors.formUnion(outgoing)
@@ -1065,7 +1065,7 @@ public class PersistentGraph {
     ///   - maxIterations: Maximum number of iterations
     ///   - resolution: Resolution parameter (default: 1.0)
     /// - Returns: Array of communities, each community is an array of vertex IDs
-    public func getCommunitiesLouvain(maxIterations: Int = 100, resolution: Double = 1.0) -> [[VertexID]] {
+    func getCommunitiesLouvain(maxIterations: Int = 100, resolution: Double = 1.0) -> [[VertexID]] {
         let communities = detectCommunitiesLouvain(maxIterations: maxIterations, resolution: resolution)
 
         // Group vertices by community
@@ -1103,12 +1103,12 @@ public class PersistentGraph {
 
     /// Find vertices by property value
     /// Returns array of vertex IDs that have the given property with the given value
-    public func findByProperty(_ propertyName: String, value: PropertyValue) -> [VertexID] {
+    func findByProperty(_ propertyName: String, value: PropertyValue) -> [VertexID] {
         return Array(propertyIndex[propertyName]?[value] ?? [])
     }
 
     /// Get all unique values for a property
-    public func getPropertyValues(_ propertyName: String) -> [PropertyValue] {
+    func getPropertyValues(_ propertyName: String) -> [PropertyValue] {
         guard let index = propertyIndex[propertyName] else {
             return []
         }
@@ -1116,7 +1116,7 @@ public class PersistentGraph {
     }
 
     /// Update vertex properties (and update index)
-    public func updateVertex(id: VertexID, properties: [String: PropertyValue]) throws {
+    func updateVertex(id: VertexID, properties: [String: PropertyValue]) throws {
         guard var vertex = vertices[id] else {
             throw GraphError.vertexNotFound(id)
         }
@@ -1140,7 +1140,7 @@ public class PersistentGraph {
     ///   - labelProperty: Property name to use as vertex label (default: "name")
     ///   - coloredByCommunity: Whether to color vertices by community
     /// - Returns: DOT format string
-    public func exportToDOT(directed: Bool = true, labelProperty: String = "name", coloredByCommunity: Bool = false) -> String {
+    func exportToDOT(directed: Bool = true, labelProperty: String = "name", coloredByCommunity: Bool = false) -> String {
         var dot = ""
 
         // Header
@@ -1197,19 +1197,19 @@ public class PersistentGraph {
     }
 
     /// Save graph to DOT file
-    public func saveToDOT(filePath: String, directed: Bool = true, labelProperty: String = "name", coloredByCommunity: Bool = false) throws {
+    func saveToDOT(filePath: String, directed: Bool = true, labelProperty: String = "name", coloredByCommunity: Bool = false) throws {
         let dot = exportToDOT(directed: directed, labelProperty: labelProperty, coloredByCommunity: coloredByCommunity)
         try dot.write(to: URL(fileURLWithPath: filePath), atomically: true, encoding: .utf8)
     }
 
     /// Export graph with communities highlighted
-    public func exportWithCommunities(filePath: String) throws {
+    func exportWithCommunities(filePath: String) throws {
         try saveToDOT(filePath: filePath, directed: false, labelProperty: "name", coloredByCommunity: true)
     }
 
     // MARK: - Persistence (JSON format)
 
-    public func save() throws {
+    func save() throws {
         let data = try serializeToJSON()
 
         // Atomic write
@@ -1334,7 +1334,7 @@ public class PersistentGraph {
     // MARK: - Persistence (Binary format)
 
     /// Save graph to binary file
-    public func saveBinary() throws {
+    func saveBinary() throws {
         let data = try serializeToBinary()
 
         // Atomic write
@@ -1358,7 +1358,7 @@ public class PersistentGraph {
     }
 
     /// Load graph from binary file
-    public func loadBinary() throws {
+    func loadBinary() throws {
         let binaryPath = filePath.replacingOccurrences(of: ".json", with: ".bin")
         let data = try Data(contentsOf: URL(fileURLWithPath: binaryPath))
         try deserializeFromBinary(data: data)
@@ -1504,37 +1504,37 @@ class BinaryBuffer {
 
     // Write methods
 
-    public func writeBytes(_ bytes: [UInt8]) {
+    func writeBytes(_ bytes: [UInt8]) {
         data.append(contentsOf: bytes)
     }
 
-    public func writeUInt16(_ value: UInt16) {
+    func writeUInt16(_ value: UInt16) {
         var value = value.bigEndian
         data.append(Data(bytes: &value, count: MemoryLayout<UInt16>.size))
     }
 
-    public func writeUInt32(_ value: UInt32) {
+    func writeUInt32(_ value: UInt32) {
         var value = value.bigEndian
         data.append(Data(bytes: &value, count: MemoryLayout<UInt32>.size))
     }
 
-    public func writeUInt64(_ value: UInt64) {
+    func writeUInt64(_ value: UInt64) {
         var value = value.bigEndian
         data.append(Data(bytes: &value, count: MemoryLayout<UInt64>.size))
     }
 
-    public func writeDouble(_ value: Double) {
+    func writeDouble(_ value: Double) {
         var value = value.bitPattern.bigEndian
         data.append(Data(bytes: &value, count: MemoryLayout<UInt64>.size))
     }
 
-    public func writeString(_ string: String) {
+    func writeString(_ string: String) {
         let bytes = [UInt8](string.utf8)
         writeUInt32(UInt32(bytes.count))
         writeBytes(bytes)
     }
 
-    public func writePropertyValue(_ value: PropertyValue) {
+    func writePropertyValue(_ value: PropertyValue) {
         switch value {
         case .string(let s):
             writeBytes([BinaryFormat.PropertyType.string.rawValue])
@@ -1566,42 +1566,42 @@ class BinaryBuffer {
 
     private var readOffset = 0
 
-    public func readBytes(_ count: Int) -> [UInt8] {
+    func readBytes(_ count: Int) -> [UInt8] {
         let bytes = [UInt8](data[readOffset..<readOffset + count])
         readOffset += count
         return bytes
     }
 
-    public func readUInt16() -> UInt16 {
+    func readUInt16() -> UInt16 {
         let value = data.withUnsafeBytes { $0.load(fromByteOffset: readOffset, as: UInt16.self) }
         readOffset += MemoryLayout<UInt16>.size
         return UInt16(bigEndian: value)
     }
 
-    public func readUInt32() -> UInt32 {
+    func readUInt32() -> UInt32 {
         let value = data.withUnsafeBytes { $0.load(fromByteOffset: readOffset, as: UInt32.self) }
         readOffset += MemoryLayout<UInt32>.size
         return UInt32(bigEndian: value)
     }
 
-    public func readUInt64() -> UInt64 {
+    func readUInt64() -> UInt64 {
         let value = data.withUnsafeBytes { $0.load(fromByteOffset: readOffset, as: UInt64.self) }
         readOffset += MemoryLayout<UInt64>.size
         return UInt64(bigEndian: value)
     }
 
-    public func readDouble() -> Double {
+    func readDouble() -> Double {
         let bitPattern = readUInt64()
         return Double(bitPattern: bitPattern)
     }
 
-    public func readString() -> String {
+    func readString() -> String {
         let length = readUInt32()
         let bytes = readBytes(Int(length))
         return String(bytes: bytes, encoding: .utf8) ?? ""
     }
 
-    public func readPropertyValue() -> PropertyValue {
+    func readPropertyValue() -> PropertyValue {
         let typeRaw = readBytes(1)[0]
         guard let type = BinaryFormat.PropertyType(rawValue: typeRaw) else {
             return .null
