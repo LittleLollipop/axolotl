@@ -109,6 +109,8 @@ class PersistentGraph {
     private var dirtyVertices: Set<VertexID> = [] // Vertices affected by recent changes
     private var pagerankScores: [VertexID: Double] = [:] // Cached PageRank scores
     private var isPageRankDirty: Bool = true // Whether PageRank scores need to be recomputed
+    private var bfsCache: [VertexID: [VertexID: Int]] = [:] // start -> (vertex -> distance)
+    private var dirtyBFSStarts: Set<VertexID> = [] // BFS results that need to be recomputed
     
     // MARK: - Initialization
     init(filePath: String) throws {
@@ -201,6 +203,10 @@ class PersistentGraph {
         dirtyVertices.insert(to)
         isPageRankDirty = true
         
+        // Mark BFS cache as dirty for affected start vertices
+        markBFSCacheDirty(for: from)
+        markBFSCacheDirty(for: to)
+        
         return edgeId
     }
     
@@ -219,6 +225,10 @@ class PersistentGraph {
         dirtyVertices.insert(from)
         dirtyVertices.insert(to)
         isPageRankDirty = true
+        
+        // Mark BFS cache as dirty for affected start vertices
+        markBFSCacheDirty(for: from)
+        markBFSCacheDirty(for: to)
     }
     
     // MARK: - Query Operations
@@ -305,8 +315,96 @@ class PersistentGraph {
                         current = p
                     }
                     
-                    return path
+        return path
+    }
+    
+    /// Incremental BFS (uses cache when possible)
+    /// Returns dictionary mapping vertex ID to distance from start
+    func bfsDistances(from start: VertexID) -> [VertexID: Int] {
+        guard vertices[start] != nil else { return [:] }
+        
+        // Check if cache is valid
+        if let cached = bfsCache[start], !dirtyBFSStarts.contains(start) {
+            return cached
+        }
+        
+        // Recompute BFS
+        let distances = computeBFS(from: start)
+        bfsCache[start] = distances
+        dirtyBFSStarts.remove(start)
+        
+        return distances
+    }
+    
+    /// Get BFS traversal order (uses cache)
+    func bfs(from start: VertexID, maxDepth: Int = Int.max) -> [VertexID] {
+        let distances = bfsDistances(from: start)
+        
+        // Sort by distance, then by vertex ID for determinism
+        let result = distances.sorted { (a, b) in
+            if a.value != b.value {
+                return a.value < b.value
+            }
+            return a.key < b.key
+        }.prefix(while: { $0.value <= maxDepth }).map { $0.key }
+        
+        return result
+    }
+    
+    /// Mark BFS cache as dirty for affected start vertices
+    private func markBFSCacheDirty(for vertexId: VertexID) {
+        // If vertexId is reachable from a start vertex, that start vertex's BFS cache is dirty
+        // For simplicity, mark all cached BFS results as dirty
+        // In a more optimized version, we would only mark BFS results for start vertices that can reach vertexId
+        for start in bfsCache.keys {
+            if isReachable(from: start, to: vertexId) || isReachable(from: vertexId, to: start) {
+                dirtyBFSStarts.insert(start)
+            }
+        }
+    }
+    
+    /// Check if there's a path from start to target
+    private func isReachable(from start: VertexID, to target: VertexID) -> Bool {
+        if let distances = bfsCache[start] {
+            return distances[target] != nil
+        }
+        return true // Conservative: assume reachable if we don't have cache
+    }
+    
+    /// Compute BFS distances from start vertex
+    private func computeBFS(from start: VertexID) -> [VertexID: Int] {
+        guard vertices[start] != nil else { return [:] }
+        
+        var distances: [VertexID: Int] = [:]
+        var visited = Set<VertexID>()
+        var queue = [start]
+        var depth = 0
+        
+        visited.insert(start)
+        distances[start] = 0
+        
+        while !queue.isEmpty {
+            let levelSize = queue.count
+            var nextLevel: [VertexID] = []
+            
+            for _ in 0..<levelSize {
+                let v = queue.removeFirst()
+                
+                for neighbor in adjacencyList[v] ?? [] {
+                    if !visited.contains(neighbor) {
+                        visited.insert(neighbor)
+                        distances[neighbor] = depth + 1
+                        nextLevel.append(neighbor)
+                    }
                 }
+            }
+            
+            queue = nextLevel
+            depth += 1
+        }
+        
+        return distances
+    }
                 
                 if !visited.contains(neighbor) {
                     visited.insert(neighbor)
