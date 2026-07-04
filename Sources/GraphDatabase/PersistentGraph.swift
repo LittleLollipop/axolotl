@@ -101,6 +101,7 @@ class PersistentGraph {
     private var vertices: [VertexID: Vertex] = [:]
     private var edges: [EdgeID: Edge] = [:]
     private var adjacencyList: [VertexID: Set<VertexID>] = [:]
+    private var propertyIndex: [String: [PropertyValue: Set<VertexID>]] = [:] // propertyName -> (value -> vertex IDs)
     private let filePath: String
     
     // MARK: - Initialization
@@ -128,12 +129,20 @@ class PersistentGraph {
         vertices[vid] = vertex
         adjacencyList[vid] = []
         
+        // Update property index
+        updatePropertyIndex(for: vid, properties: properties, isDelete: false)
+        
         return vid
     }
     
     func deleteVertex(id: VertexID) throws {
         guard vertices[id] != nil else {
             throw GraphError.vertexNotFound(id)
+        }
+        
+        // Remove from property index
+        if let vertex = vertices[id] {
+            updatePropertyIndex(for: id, properties: vertex.properties, isDelete: true)
         }
         
         // Remove all connected edges
@@ -348,6 +357,61 @@ class PersistentGraph {
         return scores
     }
     
+    // MARK: - Property Index
+    
+    private func updatePropertyIndex(for vertexId: VertexID, properties: [String: PropertyValue], isDelete: Bool) {
+        for (key, value) in properties {
+            if propertyIndex[key] == nil {
+                propertyIndex[key] = [:]
+            }
+            
+            if isDelete {
+                // Remove from index
+                propertyIndex[key]?[value]?.remove(vertexId)
+                if propertyIndex[key]?[value]?.isEmpty == true {
+                    propertyIndex[key]?.removeValue(forKey: value)
+                }
+            } else {
+                // Add to index
+                if propertyIndex[key]?[value] == nil {
+                    propertyIndex[key]?[value] = []
+                }
+                propertyIndex[key]?[value]?.insert(vertexId)
+            }
+        }
+    }
+    
+    /// Find vertices by property value
+    /// Returns array of vertex IDs that have the given property with the given value
+    func findByProperty(_ propertyName: String, value: PropertyValue) -> [VertexID] {
+        return Array(propertyIndex[propertyName]?[value] ?? [])
+    }
+    
+    /// Get all unique values for a property
+    func getPropertyValues(_ propertyName: String) -> [PropertyValue] {
+        guard let index = propertyIndex[propertyName] else {
+            return []
+        }
+        return Array(index.keys)
+    }
+    
+    /// Update vertex properties (and update index)
+    func updateVertex(id: VertexID, properties: [String: PropertyValue]) throws {
+        guard var vertex = vertices[id] else {
+            throw GraphError.vertexNotFound(id)
+        }
+        
+        // Remove old properties from index
+        updatePropertyIndex(for: id, properties: vertex.properties, isDelete: true)
+        
+        // Update vertex
+        vertex.properties = properties
+        vertices[id] = vertex
+        
+        // Add new properties to index
+        updatePropertyIndex(for: id, properties: properties, isDelete: false)
+    }
+    
     // MARK: - Persistence (JSON format)
     
     func save() throws {
@@ -375,6 +439,12 @@ class PersistentGraph {
     private func load() throws {
         let data = try Data(contentsOf: URL(fileURLWithPath: filePath))
         try deserializeFromJSON(data: data)
+        
+        // Rebuild property index
+        propertyIndex.removeAll()
+        for (vid, vertex) in vertices {
+            updatePropertyIndex(for: vid, properties: vertex.properties, isDelete: false)
+        }
         
         print("✅ Database loaded from \(filePath)")
         print("   Vertices: \(vertices.count)")
