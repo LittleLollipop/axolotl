@@ -36,18 +36,35 @@ Axolotl is a research prototype exploring graph algorithm optimizations for unif
 
 ## Why "Axolotl"?
 
-The axolotl (*Ambystoma mexicanum*) is a neotenic salamander with extraordinary regeneration abilities — it can regrow entire limbs, spinal cord, heart, and even parts of its brain without scarring.
+The axolotl (*Ambystoma mexicanum*) is an amphibian that lives double lives — it thrives both in water (like a fish) and on land (like a salamander). **This is exactly what unified memory architecture enables: CPU and GPU working together seamlessly, like an amphibian in two elements.**
 
-This metaphor perfectly captures our approach to graph algorithms:
+But there's more to this metaphor:
 
-| Axolotl's Ability | Graph Algorithm Analogy |
-|-------------------|-------------------------|
-| Regenerate limbs | Incremental updates (only update affected parts) |
-| Adapt to environment | CPU+GPU adapt to workload dynamically |
-| Resilient healing | Graceful handling of dynamic graph changes |
-| Neoteny (stay larval) | Prototype-stage research, forever evolving |
+| Axolotl's Trait | Unified Memory Analogy |
+|-----------------|------------------------|
+| **Amphibious** (water + land) | **CPU + GPU** working together (unified memory) |
+| **Regeneration** (regrow limbs) | **Incremental updates** (only update affected parts) |
+| **Adaptability** (two environments) | **Dynamic workload balancing** (CPU/GPU adapt to task type) |
+| **Efficiency** (minimal energy waste) | **Zero-copy memory** (no data transfer overhead) |
 
-Just as the axolotl represents biological innovation in regeneration, this project explores computational "regeneration" — efficiently updating graph computation results when the graph changes.
+### The Deeper Connection
+
+Traditional computing is like a fish out of water — CPU and GPU work in separate environments:
+- **Fish (GPU)**: Great in its own element (parallel computation), but struggles on land (can't efficiently handle irregular tasks)
+- **Land animal (CPU)**: Great on land (serial tasks, complex logic), but struggles in water (slow at parallel computation)
+
+**Unified memory is the amphibious solution**:
+- CPU and GPU share the same environment (unified memory)
+- They can both work efficiently, each doing what they're best at
+- No "environmental barrier" (data transfer cost) between them
+
+### Why Not Other Animals?
+
+- **Cheetah?** Fast, but only one mode (GPU-only)
+- **Elephant?** Strong, but only one mode (CPU-only)
+- **Axolotl?** Perfect — thrives in both environments, adapts to conditions
+
+Just as the axolotl represents biological innovation in dual-environment living, this project explores computational "amphibious computing" — CPU and GPU collaborating seamlessly in unified memory architecture.
 
 ---
 
