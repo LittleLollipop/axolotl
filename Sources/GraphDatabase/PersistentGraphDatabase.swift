@@ -1,0 +1,303 @@
+import Foundation
+
+// MARK: - Persistent Graph Database (JSON-backed for now)
+
+/*
+Implementation Plan:
+1. Use JSON for simplicity (easy to debug, human-readable)
+2. Implement save/load with atomic writes
+3. Add incremental persistence (dirty flags)
+4. Later: Optimize to binary format
+*/
+
+class PersistentGraphDatabase {
+    // MARK: - Properties
+    private var vertices: [VertexID: Vertex] = [:]
+    private var edges: [EdgeID: Edge] = [:]
+    private var adjacencyList: [VertexID: Set<VertexID>] = [:]
+    
+    // Dirty tracking for incremental persistence
+    private var dirtyVertices: Set<VertexID> = []
+    private var dirtyEdges: Set<EdgeID> = []
+    private var isDirty: Bool = false
+    
+    // File path
+    private let filePath: String
+    
+    // MARK: - Initialization
+    init(filePath: String) throws {
+        self.filePath = filePath
+        
+        // Create directory if needed
+        let dir = (filePath as NSString).deletingLastPathComponent
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        
+        // Load existing data if file exists
+        if FileManager.default.fileExists(atPath: filePath) {
+            try loadFromDisk()
+        } else {
+            try saveToDisk() // Create empty database
+        }
+    }
+    
+    // MARK: - CRUD Operations (with dirty tracking)
+    
+    func addVertex(id: VertexID? = nil, properties: [String: PropertyValue] = [:]) throws -> VertexID {
+        let vid = id ?? VertexID(vertices.count)
+        
+        guard vertices[vid] == nil else {
+            throw GraphError.vertexNotFound(vid) // Vertex already exists
+        }
+        
+        let vertex = Vertex(id: vid, properties: properties)
+        vertices[vid] = vertex
+        adjacencyList[vid] = []
+        
+        // Mark as dirty
+        dirtyVertices.insert(vid)
+        isDirty = true
+        
+        return vid
+    }
+    
+    func deleteVertex(id: VertexID) throws {
+        guard let _ = vertices[id] else {
+            throw GraphError.vertexNotFound(id)
+        }
+        
+        // Remove all edges connected to this vertex
+        let neighbors = adjacencyList[id] ?? []
+        for neighbor in neighbors {
+            let edgeId = EdgeID(from: id, to: neighbor)
+            edges.removeValue(forKey: edgeId)
+            dirtyEdges.insert(edgeId)
+            
+            // Remove reverse edge from neighbor's adjacency list
+            adjacencyList[neighbor]?.remove(id)
+        }
+        
+        // Also remove incoming edges
+        for (vid, _) in vertices {
+            let edgeId = EdgeID(from: vid, to: id)
+            if edges[edgeId] != nil {
+                edges.removeValue(forKey: edgeId)
+                dirtyEdges.insert(edgeId)
+                adjacencyList[vid]?.remove(id)
+            }
+        }
+        
+        // Remove vertex
+        vertices.removeValue(forKey: id)
+        adjacencyList.removeValue(forKey: id)
+        
+        // Mark as dirty
+        dirtyVertices.insert(id)
+        isDirty = true
+    }
+    
+    func addEdge(from: VertexID, to: VertexID, properties: [String: PropertyValue] = [:], weight: Double = 1.0) throws -> EdgeID {
+        guard vertices[from] != nil else {
+            throw GraphError.vertexNotFound(from)
+        }
+        guard vertices[to] != nil else {
+            throw GraphError.vertexNotFound(to)
+        }
+        
+        let edgeId = EdgeID(from: from, to: to)
+        
+        guard edges[edgeId] == nil else {
+            throw GraphError.edgeNotFound(from, to) // Edge already exists
+        }
+        
+        let edge = Edge(id: edgeId, properties: properties, weight: weight)
+        edges[edgeId] = edge
+        adjacencyList[from]?.insert(to)
+        
+        // Mark as dirty
+        dirtyEdges.insert(edgeId)
+        isDirty = true
+        
+        return edgeId
+    }
+    
+    func deleteEdge(from: VertexID, to: VertexID) throws {
+        let edgeId = EdgeID(from: from, to: to)
+        
+        guard edges[edgeId] != nil else {
+            throw GraphError.edgeNotFound(from, to)
+        }
+        
+        edges.removeValue(forKey: edgeId)
+        adjacencyList[from]?.remove(to)
+        
+        // Mark as dirty
+        dirtyEdges.insert(edgeId)
+        isDirty = true
+    }
+    
+    // MARK: - Query Operations
+    
+    func getVertex(id: VertexID) -> Vertex? {
+        return vertices[id]
+    }
+    
+    func getEdge(from: VertexID, to: VertexID) -> Edge? {
+        return edges[EdgeID(from: from, to: to)]
+    }
+    
+    func getNeighbors(of vertexId: VertexID) -> [VertexID] {
+        return Array(adjacencyList[vertexId] ?? [])
+    }
+    
+    func getStatistics() -> (vertexCount: Int, edgeCount: Int) {
+        return (vertices.count, edges.count)
+    }
+    
+    // MARK: - Persistence (JSON format for now)
+    
+    private func saveToDisk() throws {
+        let data = try serializeToJSON()
+        
+        // Atomic write: write to temp file, then rename
+        let tempPath = filePath + ".tmp"
+        try data.write(to: URL(fileURLWithPath: tempPath))
+        try FileManager.default.moveItem(atPath: tempPath, toPath: filePath)
+        
+        // Clear dirty flags
+        dirtyVertices.removeAll()
+        dirtyEdges.removeAll()
+        isDirty = false
+        
+        print("✅ Database saved to \(filePath)")
+        print("   Vertices: \(vertices.count)")
+        print("   Edges: \(edges.count)")
+    }
+    
+    private func loadFromDisk() throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: filePath))
+        try deserializeFromJSON(data: data)
+        
+        print("✅ Database loaded from \(filePath)")
+        print("   Vertices: \(vertices.count)")
+        print("   Edges: \(edges.count)")
+    }
+    
+    private func serializeToJSON() throws -> Data {
+        // Serialize vertices
+        let verticesArray = vertices.values.map { vertex in
+            return [
+                "id": vertex.id,
+                "properties": vertex.properties.mapValues { $0.toAny() }
+            ]
+        }
+        
+        // Serialize edges
+        let edgesArray = edges.values.map { edge in
+            return [
+                "from": edge.id.from,
+                "to": edge.id.to,
+                "properties": edge.properties.mapValues { $0.toAny() },
+                "weight": edge.weight
+            ]
+        }
+        
+        // Build JSON object
+        let jsonObject: [String: Any] = [
+            "version": "1.0",
+            "vertexCount": vertices.count,
+            "edgeCount": edges.count,
+            "vertices": verticesArray,
+            "edges": edgesArray
+        ]
+        
+        return try JSONSerialization.data(withJSONObject: jsonObject, options: [.prettyPrinted])
+    }
+    
+    private func deserializeFromJSON(data: Data) throws {
+        guard let jsonObject = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let version = jsonObject["version"] as? String,
+              let verticesArray = jsonObject["vertices"] as? [[String: Any]],
+              let edgesArray = jsonObject["edges"] as? [[String: Any]] else {
+            throw GraphError.ioError("Invalid JSON format")
+        }
+        
+        print("   File version: \(version)")
+        
+        // Clear existing data
+        vertices.removeAll()
+        edges.removeAll()
+        adjacencyList.removeAll()
+        
+        // Deserialize vertices
+        for vertexDict in verticesArray {
+            guard let id = vertexDict["id"] as? UInt64,
+                  let propertiesDict = vertexDict["properties"] as? [String: Any] else {
+                continue
+            }
+            
+            let properties = propertiesDict.mapValues { PropertyValue.fromAny($0) }
+            let vertex = Vertex(id: id, properties: properties)
+            vertices[id] = vertex
+            adjacencyList[id] = []
+        }
+        
+        // Deserialize edges
+        for edgeDict in edgesArray {
+            guard let from = edgeDict["from"] as? UInt64,
+                  let to = edgeDict["to"] as? UInt64,
+                  let propertiesDict = edgeDict["properties"] as? [String: Any] else {
+                continue
+            }
+            
+            let edgeId = EdgeID(from: from, to: to)
+            let properties = propertiesDict.mapValues { PropertyValue.fromAny($0) }
+            let weight = edgeDict["weight"] as? Double ?? 1.0
+            let edge = Edge(id: edgeId, properties: properties, weight: weight)
+            
+            edges[edgeId] = edge
+            adjacencyList[from]?.insert(to)
+        }
+    }
+    
+    // MARK: - Public Persistence API
+    
+    /// Save the database to disk (full save)
+    func save() throws {
+        try saveToDisk()
+    }
+    
+    /// Save only dirty data (incremental persistence)
+    func saveIncremental() throws {
+        // TODO: Implement incremental save
+        // For now, just do full save
+        try saveToDisk()
+    }
+    
+    /// Check if there are unsaved changes
+    var hasUnsavedChanges: Bool {
+        return isDirty
+    }
+}
+
+// MARK: - Helper Extensions
+
+extension PropertyValue {
+    func toAny() -> Any {
+        switch self {
+        case .string(let s): return s
+        case .int(let i): return i
+        case .double(let d): return d
+        case .bool(let b): return b
+        case .null: return NSNull()
+        }
+    }
+    
+    static func fromAny(_ any: Any) -> PropertyValue {
+        if let s = any as? String { return .string(s) }
+        if let i = any as? Int { return .int(i) }
+        if let d = any as? Double { return .double(d) }
+        if let b = any as? Bool { return .bool(b) }
+        if any is NSNull { return .null }
+        return .null
+    }
+}

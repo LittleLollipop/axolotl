@@ -1,0 +1,10 @@
+{
+  "edgeCount" : 20000,
+  "changedPercentage" : 7.8600000000000003,
+  "fullTime" : 0.27975020930171013,
+  "changedVertices" : 393,
+  "algorithm" : "K-core Decomposition",
+  "vertexCount" : 5000,
+  "newEdgeCount" : 500,
+  "verifyTime" : 0.24924986064434052
+}

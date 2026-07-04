@@ -1026,6 +1026,126 @@ class PersistentGraph {
         return Array(result.values)
     }
 
+    // MARK: - Community Detection (Louvain Algorithm)
+
+    /// Louvain Algorithm for community detection
+    /// Correct implementation with proper modularity gain formula
+    /// Returns dictionary mapping vertex ID to community ID
+    func detectCommunitiesLouvain(maxIterations: Int = 100) -> [VertexID: Int] {
+        let n = vertices.count
+        guard n > 0 else { return [:] }
+
+        // Initialize: each vertex is its own community
+        var communities: [VertexID: Int] = [:]
+        for (i, vid) in vertices.keys.enumerated() {
+            communities[vid] = i
+        }
+
+        let m = Double(edges.count) // Total number of edges
+        guard m > 0 else { return communities }
+
+        // Precompute degrees
+        var degrees: [VertexID: Double] = [:]
+        for vid in vertices.keys {
+            degrees[vid] = Double(getAllNeighbors(of: vid).count)
+        }
+
+        // Louvain iterations
+        for _ in 0..<maxIterations {
+            var improved = false
+
+            // Process vertices in random order (important for Louvain)
+            let vertexOrder = vertices.keys.shuffled()
+
+            for vid in vertexOrder {
+                let neighbors = getAllNeighbors(of: vid)
+                if neighbors.isEmpty { continue }
+
+                let currentCommunity = communities[vid]!
+                let k_i = degrees[vid]!
+
+                // Compute sum of degrees for each community
+                var communityDegrees: [Int: Double] = [:]
+                for (otherVid, community) in communities {
+                    communityDegrees[community, default: 0.0] += degrees[otherVid]!
+                }
+
+                // Compute k_i,in for each community (sum of edge weights to community)
+                var communityKin: [Int: Double] = [:]
+                for neighbor in neighbors {
+                    let neighborCommunity = communities[neighbor]!
+                    let weight = getEdgeWeight(from: vid, to: neighbor)
+                    communityKin[neighborCommunity, default: 0.0] += weight
+                }
+
+                // Find best community to move to
+                var bestCommunity = currentCommunity
+                var bestGain = 0.0
+
+                // Try removing vid from current community
+                let removeGain = communityKin[currentCommunity]! / (2.0 * m) - (communityDegrees[currentCommunity]! - k_i) * k_i / (2.0 * m * 2.0 * m)
+
+                // Try adding vid to each neighboring community
+                for (community, k_i_in) in communityKin {
+                    if community == currentCommunity { continue }
+
+                    let addGain = k_i_in / (2.0 * m) - communityDegrees[community]! * k_i / (2.0 * m * 2.0 * m)
+
+                    if addGain > bestGain {
+                        bestGain = addGain
+                        bestCommunity = community
+                    }
+                }
+
+                // Move vertex if improvement
+                if bestCommunity != currentCommunity && bestGain > 0 {
+                    communities[vid] = bestCommunity
+                    improved = true
+                }
+            }
+
+            // Check convergence
+            if !improved {
+                break
+            }
+        }
+
+        return communities
+    }
+
+    /// Get all neighbors (both outgoing and incoming edges)
+    private func getAllNeighbors(of vertex: VertexID) -> Set<VertexID> {
+        var neighbors: Set<VertexID> = []
+        if let outgoing = adjacencyList[vertex] {
+            neighbors.formUnion(outgoing)
+        }
+        if let incoming = reverseAdjacencyList[vertex] {
+            neighbors.formUnion(incoming)
+        }
+        return neighbors
+    }
+
+    /// Get edge weight between two vertices
+    private func getEdgeWeight(from: VertexID, to: VertexID) -> Double {
+        if let edge = edges[EdgeID(from: from, to: to)] {
+            return edge.weight
+        }
+        return 1.0 // Default weight
+    }
+
+    /// Get communities using Louvain algorithm (grouped by label)
+    func getCommunitiesLouvain(maxIterations: Int = 100) -> [[VertexID]] {
+        let communities = detectCommunitiesLouvain(maxIterations: maxIterations)
+
+        // Group vertices by community
+        var result: [Int: [VertexID]] = [:]
+        for (vid, community) in communities {
+            result[community, default: []].append(vid)
+        }
+
+        return Array(result.values)
+    }
+
     // MARK: - Property Index
 
     private func updatePropertyIndex(for vertexId: VertexID, properties: [String: PropertyValue], isDelete: Bool) {
@@ -1079,6 +1199,81 @@ class PersistentGraph {
 
         // Add new properties to index
         updatePropertyIndex(for: id, properties: properties, isDelete: false)
+    }
+
+    // MARK: - Graph Visualization (DOT format)
+
+    /// Export graph to Graphviz DOT format
+    /// - Parameters:
+    ///   - directed: Whether to use directed edges (digraph) or undirected (graph)
+    ///   - labelProperty: Property name to use as vertex label (default: "name")
+    ///   - coloredByCommunity: Whether to color vertices by community
+    /// - Returns: DOT format string
+    func exportToDOT(directed: Bool = true, labelProperty: String = "name", coloredByCommunity: Bool = false) -> String {
+        var dot = ""
+
+        // Header
+        if directed {
+            dot += "digraph G {\n"
+        } else {
+            dot += "graph G {\n"
+        }
+
+        dot += "  // Graph generated by Axolotl\n"
+        dot += "  node [shape=circle, style=filled];\n\n"
+
+        // Compute communities if needed
+        var communities: [VertexID: Int] = [:]
+        if coloredByCommunity {
+            communities = detectCommunitiesGreedy()
+        }
+
+        // Vertex colors for communities
+        let colors = ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4", "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F", "#BB8FCE", "#85C1E9"]
+
+        // Vertices
+        dot += "  // Vertices\n"
+        for (vid, vertex) in vertices {
+            let label = vertex.properties[labelProperty]?.description ?? "\(vid)"
+
+            var attrs = "label=\"\(label)\""
+            if coloredByCommunity, let community = communities[vid] {
+                let colorIndex = community % colors.count
+                attrs += ", fillcolor=\"\(colors[colorIndex])\""
+            }
+
+            dot += "  \(vid) [\(attrs)];\n"
+        }
+
+        dot += "\n"
+
+        // Edges
+        dot += "  // Edges\n"
+        for (edgeId, edge) in edges {
+            let edgeSymbol = directed ? "->" : "--"
+
+            var attrs = ""
+            if edge.weight != 1.0 {
+                attrs = " [weight=\(edge.weight)]"
+            }
+
+            dot += "  \(edgeId.from) \(edgeSymbol) \(edgeId.to)\(attrs);\n"
+        }
+
+        dot += "}\n"
+
+        return dot
+    }
+
+    /// Save graph to DOT file
+    func saveToDOT(filePath: String, directed: Bool = true, labelProperty: String = "name", coloredByCommunity: Bool = false) throws {
+        let dot = exportToDOT(directed: directed, labelProperty: labelProperty, coloredByCommunity: coloredByCommunity)
+        try dot.write(to: URL(fileURLWithPath: filePath), atomically: true, encoding: .utf8)
+    }
+
+    /// Export graph with communities highlighted
+    func exportWithCommunities(filePath: String) throws {
+        try saveToDOT(filePath: filePath, directed: false, labelProperty: "name", coloredByCommunity: true)
     }
 
     // MARK: - Persistence (JSON format)

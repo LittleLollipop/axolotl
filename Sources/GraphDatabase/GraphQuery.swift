@@ -5,17 +5,26 @@ import Foundation
 /*
  Usage Examples:
 
- 1. Find vertices by property:
-    let results = graph.query().matchVertex(alias: "v").where(property: "name", equals: .string("Alice")).execute()
+1. Find vertices by property:
+    let results = graph.query().matchVertex(alias: "v").`where`(property: "name", equals: .string("Alice")).execute()
 
- 2. Find neighbors:
+2. Find neighbors:
     let results = graph.query().matchNeighbors(of: 1).execute()
 
- 3. Find shortest path:
+3. Find shortest path:
     let path = graph.query().shortestPath(from: 1, to: 5)
 
- 4. Find vertices in community:
-    let community = graph.query().matchVertex(alias: "v").whereCommunity(is: 0).execute()
+4. Find vertices in community:
+    let community = graph.query().matchVertex(alias: "v").`where`(community: 0).execute()
+
+5. Aggregation:
+    let stats = graph.aggregate(property: "age", functions: [.count, .avg, .max, .min])
+
+6. Find all paths:
+    let paths = graph.findAllPaths(from: 1, to: 5, maxDepth: 5)
+
+7. Extract subgraph:
+    let subgraph = graph.extractSubgraph(vertices: [1, 2, 3, 4])
 */
 
 // MARK: - Query Builder
@@ -36,11 +45,21 @@ class GraphQueryBuilder {
         return self
     }
 
-    /// Add WHERE clause
+    /// Add WHERE clause (property equals)
     func `where`(property: String, equals value: PropertyValue) -> GraphQueryBuilder {
         if case .matchVertex(let alias, let conditions) = steps.last {
             var newConditions = conditions
             newConditions.append(.propertyEquals(property, value))
+            steps[steps.count - 1] = .matchVertex(alias: alias, conditions: newConditions)
+        }
+        return self
+    }
+
+    /// Add WHERE clause (in community)
+    func `where`(community: Int) -> GraphQueryBuilder {
+        if case .matchVertex(let alias, let conditions) = steps.last {
+            var newConditions = conditions
+            newConditions.append(.inCommunity(community))
             steps[steps.count - 1] = .matchVertex(alias: alias, conditions: newConditions)
         }
         return self
@@ -85,6 +104,11 @@ class GraphQueryBuilder {
 
         return results
     }
+
+    /// Find shortest path
+    func shortestPath(from: VertexID, to: VertexID) -> [VertexID]? {
+        return graph.shortestPath(from: from, to: to)
+    }
 }
 
 // MARK: - Query Steps
@@ -104,6 +128,16 @@ enum WhereCondition {
     case inCommunity(Int)
 }
 
+// MARK: - Aggregation Functions
+
+enum AggregationFunction {
+    case count
+    case sum
+    case avg
+    case max
+    case min
+}
+
 // MARK: - Extension to PersistentGraph
 
 extension PersistentGraph {
@@ -116,8 +150,8 @@ extension PersistentGraph {
     func findVertices(where conditions: [WhereCondition]) -> [VertexID] {
         var result: [VertexID] = []
 
-        for (vid, vertex) in vertices {
-            if matchesConditions(vertex.properties, conditions: conditions) {
+        for (vid, _) in vertices {
+            if matchesConditions(vid, conditions: conditions) {
                 result.append(vid)
             }
         }
@@ -127,14 +161,14 @@ extension PersistentGraph {
 
     /// Find neighbors of a vertex matching conditions
     func findNeighbors(of vertexId: VertexID, where conditions: [WhereCondition]) -> [VertexID] {
-        let neighbors = getNeighbors(of: vertexId)
+        let neighbors = getAllNeighbors(of: vertexId)
 
         if conditions.isEmpty {
-            return neighbors
+            return Array(neighbors)
         }
 
         return neighbors.filter { neighborId in
-            if let vertex = getVertex(id: neighborId) {
+            if let vertex = vertices[neighborId] {
                 return matchesConditions(vertex.properties, conditions: conditions)
             }
             return false
@@ -149,18 +183,139 @@ extension PersistentGraph {
         return targetCommunity ?? []
     }
 
+    // MARK: - Aggregation Functions
+
+    /// Aggregate vertex properties
+    /// - Parameter property: Property name to aggregate
+    /// - Parameter functions: Aggregation functions to compute
+    /// - Returns: Dictionary mapping function name to result
+    func aggregate(property: String, functions: [AggregationFunction]) -> [String: Double] {
+        var results: [String: Double] = [:]
+
+        // Extract numeric values
+        var values: [Double] = []
+        for (_, vertex) in vertices {
+            if let propValue = vertex.properties[property] {
+                switch propValue {
+                case .int(let i):
+                    values.append(Double(i))
+                case .double(let d):
+                    values.append(d)
+                default:
+                    continue
+                }
+            }
+        }
+
+        guard !values.isEmpty else { return [:] }
+
+        for function in functions {
+            switch function {
+            case .count:
+                results["count"] = Double(values.count)
+
+            case .sum:
+                results["sum"] = values.reduce(0, +)
+
+            case .avg:
+                results["avg"] = values.reduce(0, +) / Double(values.count)
+
+            case .max:
+                results["max"] = values.max()!
+
+            case .min:
+                results["min"] = values.min()!
+            }
+        }
+
+        return results
+    }
+
+    // MARK: - Path Queries
+
+    /// Find all paths between two vertices (with depth limit)
+    /// - Parameters:
+    ///   - from: Source vertex
+    ///   - to: Target vertex
+    ///   - maxDepth: Maximum path length (default: 5)
+    /// - Returns: Array of paths (each path is an array of vertex IDs)
+    func findAllPaths(from: VertexID, to: VertexID, maxDepth: Int = 5) -> [[VertexID]] {
+        var paths: [[VertexID]] = []
+        var currentPath: [VertexID] = [from]
+        var visited: Set<VertexID> = [from]
+
+        findAllPathsHelper(current: from, target: to, maxDepth: maxDepth, currentDepth: 0, currentPath: &currentPath, visited: &visited, paths: &paths)
+
+        return paths
+    }
+
+    private func findAllPathsHelper(current: VertexID, target: VertexID, maxDepth: Int, currentDepth: Int, currentPath: inout [VertexID], visited: inout Set<VertexID>, paths: inout [[VertexID]]) {
+        if currentDepth > maxDepth {
+            return
+        }
+
+        if current == target && currentDepth > 0 {
+            paths.append(currentPath)
+            return
+        }
+
+        let neighbors = getAllNeighbors(of: current)
+        for neighbor in neighbors {
+            if !visited.contains(neighbor) {
+                visited.insert(neighbor)
+                currentPath.append(neighbor)
+                findAllPathsHelper(current: neighbor, target: target, maxDepth: maxDepth, currentDepth: currentDepth + 1, currentPath: &currentPath, visited: &visited, paths: &paths)
+                currentPath.removeLast()
+                visited.remove(neighbor)
+            }
+        }
+    }
+
+    // MARK: - Subgraph Extraction
+
+    /// Extract subgraph containing only specified vertices and edges between them
+    /// - Parameter vertexIds: Vertices to include in subgraph
+    /// - Returns: New PersistentGraph containing only the specified vertices and edges between them
+    func extractSubgraph(vertices vertexIds: [VertexID]) -> PersistentGraph {
+        let subgraph = PersistentGraph()
+
+        // Add vertices
+        for vid in vertexIds {
+            if let vertex = vertices[vid] {
+                try! subgraph.addVertex(id: vid, properties: vertex.properties)
+            }
+        }
+
+        // Add edges between specified vertices
+        for vid in vertexIds {
+            let neighbors = getAllNeighbors(of: vid)
+            for neighbor in neighbors {
+                if vertexIds.contains(neighbor) {
+                    if let edge = edges[EdgeID(from: vid, to: neighbor)] {
+                        try! subgraph.addEdge(from: vid, to: neighbor, properties: edge.properties, weight: edge.weight)
+                    }
+                }
+            }
+        }
+
+        return subgraph
+    }
+
     // MARK: - Helper Methods
 
-    private func matchesConditions(_ properties: [String: PropertyValue], conditions: [WhereCondition]) -> Bool {
+    private func matchesConditions(_ vertexId: VertexID, conditions: [WhereCondition]) -> Bool {
         for condition in conditions {
-            if !matchesCondition(properties, condition: condition) {
+            if !matchesCondition(vertexId: vertexId, condition: condition) {
                 return false
             }
         }
         return true
     }
 
-    private func matchesCondition(_ properties: [String: PropertyValue], condition: WhereCondition) -> Bool {
+    private func matchesCondition(vertexId: VertexID, condition: WhereCondition) -> Bool {
+        guard let vertex = vertices[vertexId] else { return false }
+        let properties = vertex.properties
+
         switch condition {
         case .propertyEquals(let key, let value):
             return properties[key] == value
@@ -178,17 +333,21 @@ extension PersistentGraph {
 
         case .inCommunity(let communityId):
             let communities = getCommunitiesGreedy()
-            let vertexCommunity = communities.firstIndex { $0.contains(where: { $0 == getVertex(id: 1) != nil }) }
-            return vertexCommunity == communityId
+            for (idx, community) in communities.enumerated() {
+                if community.contains(vertexId) {
+                    return idx == communityId
+                }
+            }
+            return false
         }
     }
 
     private func compareValues(_ lhs: PropertyValue, _ rhs: PropertyValue, operator: (Int) -> Bool) -> Bool {
         switch (lhs, rhs) {
         case (.int(let l), .int(let r)):
-            return operator(l - r)
+            return `operator`(l - r)
         case (.double(let l), .double(let r)):
-            return operator(Int(l - r))
+            return `operator`(Int(l - r))
         default:
             return false
         }

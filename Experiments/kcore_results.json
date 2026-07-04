@@ -1,0 +1,16 @@
+{
+  "speedupAdd" : 25.787807149509277,
+  "correctnessRemove" : false,
+  "edgeCount" : 20000,
+  "k" : 5,
+  "affectedVerticesAdd" : 86,
+  "affectedVerticesRemove" : 2005,
+  "incrementalRemoveTime" : 0.038750004023313522,
+  "speedupRemove" : 8.3795709908069451,
+  "incrementalAddTime" : 0.013000331819057465,
+  "algorithm" : "Incremental K-core Decomposition",
+  "vertexCount" : 5000,
+  "correctnessAdd" : false,
+  "newEdgeCount" : 500,
+  "fullTime" : 0.34945830702781677
+}
