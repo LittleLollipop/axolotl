@@ -4,6 +4,7 @@
 use thiserror::Error;
 
 pub mod graph;
+pub mod graph_db; // 统一图数据库接口（内存模式 / mmap 模式切换）
 pub mod algorithms;
 pub mod persistence;
 pub mod query; // Fluent Builder 查询 API

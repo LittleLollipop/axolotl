@@ -210,15 +210,26 @@ impl PersistentGraph {
     }
 
     /// 删除顶点（自动维护索引）
-    pub fn delete_vertex(&mut self, id: u64) {
+    /// 返回被删除顶点的属性（如果存在）
+    pub fn delete_vertex(&mut self, id: u64) -> Option<HashMap<String, PropertyValue>> {
+        let mut result = None;
         if let Some(vr) = self.vertices.get(&id) {
             let properties = vr.properties.clone();
             // 更新索引
             self.index_manager.on_vertex_deleted(id, &properties);
             self.vertices.remove(&id);
+            result = Some(properties);
         }
         // 删除相关边
         self.edges.retain(|(from, to), _| *from != id && *to != id);
+        result
+    }
+
+    /// 删除边（自动维护索引）
+    /// 返回被删除边的（权重, 属性）（如果存在）
+    pub fn delete_edge(&mut self, from: u64, to: u64) -> Option<(f64, HashMap<String, PropertyValue>)> {
+        self.edges.remove(&(from, to))
+            .map(|er| (er.weight, er.properties))
     }
 
     /// 更新顶点属性（自动维护索引）
