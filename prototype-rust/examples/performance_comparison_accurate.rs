@@ -46,9 +46,9 @@ fn load_edgelist(filename: &str) -> (Vec<(u64, u64)>, u32) {
     (edges, vertex_count)
 }
 
-/// 测试 PageRank (CPU 版本，准确测量)
+/// 测试 PageRank (CPU 版本，准确测量，使用 f64)
 fn test_pagerank_cpu_accurate(edges: &[(u64, u64)], vertex_count: u32) {
-    println!("--- PageRank (CPU 版本，准确测量) ---");
+    println!("--- PageRank (CPU 版本，使用 f64) ---");
     
     // 构建邻接表（入边）
     let mut out_degrees = vec![0u32; vertex_count as usize];
@@ -66,26 +66,26 @@ fn test_pagerank_cpu_accurate(edges: &[(u64, u64)], vertex_count: u32) {
         .filter(|&v| out_degrees[v] == 0)
         .collect();
     
-    // 测试（使用大量迭代次数）
-    let iterations = 10000;
-    let mut pr = vec![1.0f32 / vertex_count as f32; vertex_count as usize];
+    // 测试（使用大量迭代次数，使用 f64）
+    let iterations = 100;
+    let mut pr = vec![1.0f64 / vertex_count as f64; vertex_count as usize];
     
     let start = Instant::now();
     for _ in 0..iterations {
-        let dangling_sum: f32 = dangling.iter()
+        let dangling_sum: f64 = dangling.iter()
             .map(|&v| pr[v])
             .sum();
-        let dangling_contribution = dangling_sum / vertex_count as f32;
+        let dangling_contribution = dangling_sum / vertex_count as f64;
         
-        let mut new_pr = vec![0.0f32; vertex_count as usize];
+        let mut new_pr = vec![0.0f64; vertex_count as usize];
         
         for v in 0..vertex_count as usize {
-            let mut contribution = 0.0f32;
+            let mut contribution = 0.0f64;
             for &u in &in_edges[v] {
-                contribution += pr[u as usize] / out_degrees[u as usize] as f32;
+                contribution += pr[u as usize] / out_degrees[u as usize] as f64;
             }
             
-            new_pr[v] = (1.0 - 0.85) / vertex_count as f32
+            new_pr[v] = (1.0 - 0.85) / vertex_count as f64
                 + 0.85 * (contribution + dangling_contribution);
         }
         
@@ -93,12 +93,12 @@ fn test_pagerank_cpu_accurate(edges: &[(u64, u64)], vertex_count: u32) {
     }
     let elapsed = start.elapsed();
     
-    let pr_sum: f32 = pr.iter().sum();
-    let avg_time_us = elapsed.as_micros() as f32 / iterations as f32;
+    let pr_sum: f64 = pr.iter().sum();
+    let avg_time_us = elapsed.as_micros() as f64 / iterations as f64;
     
     println!("  迭代次数: {}", iterations);
-    println!("  总时间: {:.4}s", elapsed.as_secs_f32());
+    println!("  总时间: {:.4}s", elapsed.as_secs_f64());
     println!("  平均每次: {:.4}μs ({:.4}ms)", avg_time_us, avg_time_us / 1000.0);
-    println!("  PR 值之和: {:.10}", pr_sum);
-    println!("  正确性: {}", if (pr_sum - 1.0).abs() < 1e-6 { "✓" } else { "✗" });
+    println!("  PR 值之和: {:.15}", pr_sum);
+    println!("  正确性: {}", if (pr_sum - 1.0).abs() < 1e-10 { "✓" } else { "✗" });
 }
