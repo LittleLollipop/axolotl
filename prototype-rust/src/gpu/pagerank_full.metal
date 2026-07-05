@@ -32,19 +32,23 @@ kernel void pagerank_full(
     // 计算 base_score
     float base_score = (1.0 - damping_factor) / float(vertex_count);
     
-    // 计算贡献（遍历入边）
+    // 计算贡献（遍历入边）—— Kahan 求和，提升 f32 精度
     float contribution = 0.0;
+    float c = 0.0;  // Kahan 补偿项
     uint start = reverse_offsets[gid];
     uint end = reverse_offsets[gid + 1];
     
     for (uint i = start; i < end; i++) {
-        uint source = reverse_targets[i];  // 源顶点（入边）
+        uint source = reverse_targets[i];
         uint source_out_degree = out_degrees[source];
         
         if (source_out_degree > 0) {
-            contribution += pr[source] / float(source_out_degree);
+            float input = pr[source] / float(source_out_degree);
+            float y = input - c;
+            float t = contribution + y;
+            c = (t - contribution) - y;
+            contribution = t;
         }
-        // 如果 source_out_degree == 0（悬挂顶点），其贡献会在 dangling_contribution 中处理
     }
     
     // 应用阻尼因子，加上悬挂顶点的贡献

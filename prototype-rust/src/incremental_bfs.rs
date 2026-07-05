@@ -84,10 +84,9 @@ impl IncrementalBFS {
             let mut new_affected = HashSet::new();
             for i in 0..vertex_count {
                 if updated_distances[i] < distances[i] {
-                    // 这个顶点的距离被更新了，需要传播给出边邻居
-                    for &neighbor in &forward_adjacency[i] {
-                        new_affected.insert(neighbor);
-                    }
+                    // 这个顶点的距离被更新了，下一轮要用它的出边去传播给邻居
+                    // 所以把 i 加入受影响集合（下一轮 GPU 会处理 i 的邻居）
+                    new_affected.insert(i as u32);
                 }
             }
             
@@ -133,7 +132,7 @@ mod tests {
         // 添加顶点
         for i in 0..5 {
             let mut props = HashMap::new();
-            props.insert("id".to_string(), crate::csr_graph::PropertyValue::Int(i as i64));
+            props.insert("id".to_string(), crate::PropertyValue::Int(i as i64));
             csr.add_vertex(i, props);
         }
         

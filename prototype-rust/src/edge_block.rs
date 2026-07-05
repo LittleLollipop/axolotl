@@ -2,6 +2,7 @@
 // EdgeBlock 数据结构实现（优化 CPU 缓存利用率）
 
 use std::collections::{HashMap, VecDeque};
+use crate::PropertyValue;
 
 /// EdgeBlock 数据结构
 /// 将边分组为固定大小的块（block），优化缓存访问
@@ -60,14 +61,6 @@ pub struct EdgeBlockGraph {
 pub struct VertexData {
     pub id: u64,
     pub properties: HashMap<String, PropertyValue>,
-}
-
-/// 属性值（简化版）
-#[derive(Debug, Clone)]
-pub enum PropertyValue {
-    Int(i64),
-    String(String),
-    Bool(bool),
 }
 
 impl EdgeBlockGraph {

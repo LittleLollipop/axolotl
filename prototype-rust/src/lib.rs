@@ -6,6 +6,9 @@ use thiserror::Error;
 pub mod graph;
 pub mod algorithms;
 pub mod persistence;
+pub mod query; // Fluent Builder 查询 API
+pub mod transaction; // 事务支持（WAL + 回滚 + 快照隔离）
+pub mod mvcc; // MVCC 快照隔离（Copy-on-Write）
 // pub mod visualization; // 暂时禁用
 pub mod edge_block; // EdgeBlock 数据结构（CPU 版本，优化缓存利用率）
 pub mod csr_graph; // CSR 格式图（用于 GPU 加速）
@@ -63,13 +66,47 @@ pub enum GraphError {
 }
 
 /// 属性值类型（支持多种数据类型）
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+///
+/// Double 使用 f64::to_bits() 转成 u64 来实现 Hash + Eq
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum PropertyValue {
     Int(i64),
     String(String),
+    Double(f64),
     Bool(bool),
     Null,
+}
+
+// ── Hash + Eq 手动实现（处理 f64）────────────────────
+
+impl PartialEq for PropertyValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (PropertyValue::Int(a), PropertyValue::Int(b)) => a == b,
+            (PropertyValue::String(a), PropertyValue::String(b)) => a == b,
+            (PropertyValue::Double(a), PropertyValue::Double(b)) => a.to_bits() == b.to_bits(),
+            (PropertyValue::Bool(a), PropertyValue::Bool(b)) => a == b,
+            (PropertyValue::Null, PropertyValue::Null) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for PropertyValue {}
+
+use std::hash::{Hash, Hasher};
+
+impl Hash for PropertyValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            PropertyValue::Int(i) => { 0u8.hash(state); i.hash(state); }
+            PropertyValue::String(s) => { 1u8.hash(state); s.hash(state); }
+            PropertyValue::Double(d) => { 2u8.hash(state); d.to_bits().hash(state); }
+            PropertyValue::Bool(b) => { 3u8.hash(state); b.hash(state); }
+            PropertyValue::Null => { 4u8.hash(state); }
+        }
+    }
 }
 
 impl PropertyValue {

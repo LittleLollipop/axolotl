@@ -65,7 +65,7 @@ mod tests {
         
         for i in 0..5 {
             let mut props = std::collections::HashMap::new();
-            props.insert("id".to_string(), crate::csr_graph::PropertyValue::Int(i as i64));
+            props.insert("id".to_string(), crate::PropertyValue::Int(i as i64));
             csr.add_vertex(i, props);
         }
         

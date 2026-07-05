@@ -670,6 +670,15 @@ impl GPUAccelerator {
         };
         new_pr.copy_from_slice(result_slice);
         
+        // 归一化：让 PR 值之和恰好为 1.0
+        // 用 f64 逐顶点计算，再写回 f32
+        let sum_f64: f64 = new_pr.iter().map(|&x| x as f64).sum();
+        if sum_f64 > 0.0 {
+            for v in new_pr.iter_mut() {
+                *v = (*v as f64 / sum_f64) as f32;
+            }
+        }
+        
         new_pr
     }
     
@@ -834,6 +843,15 @@ impl GPUAccelerator {
             std::slice::from_raw_parts(result_ptr, vertex_count_usize)
         };
         new_pr.copy_from_slice(result_slice);
+        
+        // 归一化：让 PR 值之和恰好为 1.0
+        // 用 f64 逐顶点计算，再写回 f32
+        let sum_f64: f64 = new_pr.iter().map(|&x| x as f64).sum();
+        if sum_f64 > 0.0 {
+            for v in new_pr.iter_mut() {
+                *v = (*v as f64 / sum_f64) as f32;
+            }
+        }
         
         new_pr
     }

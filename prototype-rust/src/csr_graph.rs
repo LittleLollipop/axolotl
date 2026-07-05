@@ -4,6 +4,7 @@
 // 对应 Swift 版本的 CSRGraph 结构体（第 26-38 行）
 
 use std::collections::HashMap;
+use crate::PropertyValue;
 
 /// 使用 CSR 格式的图（使用 u32 索引，与 GPU 兼容）
 /// 
@@ -50,17 +51,8 @@ pub struct VertexData {
     pub id: u64,
     pub properties: HashMap<String, PropertyValue>,
 }
-
-/// 属性值（简化版）
-#[derive(Debug, Clone)]
-pub enum PropertyValue {
-    Int(i64),
-    String(String),
-    Bool(bool),
-}
-
 impl CSRGraph {
-    /// 创建新的图
+
     pub fn new() -> Self {
         CSRGraph {
             vertices: HashMap::new(),

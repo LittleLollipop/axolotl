@@ -136,13 +136,13 @@ fn test_pagerank_full_gpu(edges: &[(u64, u64)], vertex_count: u32) {
     }
     let elapsed = start.elapsed();
     
-    let pr_sum: f32 = pr.iter().sum();
+    let pr_sum: f64 = pr.iter().map(|&x| x as f64).sum();
     
     println!("  迭代次数: {}", iterations);
     println!("  总时间: {:.4}s", elapsed.as_secs_f32());
     println!("  平均每次: {:.4}ms", elapsed.as_millis() as f32 / iterations as f32);
-    println!("  PR 值之和: {:.10}", pr_sum);
-    println!("  正确性: {}", if (pr_sum - 1.0).abs() < 1e-6 { "✓" } else { "✗" });
+    println!("  PR 值之和: {:.15}", pr_sum);
+    println!("  正确性: {}", if (pr_sum - 1.0).abs() < 1e-9 { "✓" } else { "✗" });
 }
 
 /// 测试 PageRank（GPU 增量更新版本）
@@ -213,13 +213,13 @@ fn test_pagerank_incremental_gpu(edges: &[(u64, u64)], vertex_count: u32) {
     }
     let elapsed = start.elapsed();
     
-    let pr_sum: f32 = pr.iter().sum();
+    let pr_sum: f64 = pr.iter().map(|&x| x as f64).sum();
     
     println!("  迭代次数: {}", iterations);
     println!("  总时间: {:.4}s", elapsed.as_secs_f32());
     println!("  平均每次: {:.4}ms", elapsed.as_millis() as f32 / iterations as f32);
-    println!("  PR 值之和: {:.10}", pr_sum);
-    println!("  正确性: {}", if (pr_sum - 1.0).abs() < 1e-6 { "✓" } else { "✗" });
+    println!("  PR 值之和: {:.15}", pr_sum);
+    println!("  正确性: {}", if (pr_sum - 1.0).abs() < 1e-9 { "✓" } else { "✗" });
 }
 
 /// 测试 PageRank（CPU 版本，使用 f64）

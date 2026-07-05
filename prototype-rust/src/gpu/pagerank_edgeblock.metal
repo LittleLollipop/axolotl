@@ -41,24 +41,28 @@ kernel void pagerank_edgeblock_optimized(
     uint v = affected_vertices[gid];  // 当前受影响的顶点
     if (v >= vertex_count) return;
     
-    // 遍历入边（反向 EdgeBlock）
+    // 遍历入边（反向 EdgeBlock）—— Kahan 求和，提升 f32 精度
     float contribution = 0.0;
+    float c = 0.0;  // Kahan 补偿项
     uint start = reverse_vertices[v];
     uint count = reverse_block_counts[v];
     
     for (uint b = 0; b < count; b++) {
         uint block_idx = start + b;
-        uint edge_count = reverse_blocks[block_idx * 34 + 1];  // edgeCount（每个 block 34 个 u32，索引 1 是 edgeCount）
+        uint edge_count = reverse_blocks[block_idx * 34 + 1];
         
         for (uint i = 0; i < edge_count; i++) {
-            uint source = reverse_blocks[block_idx * 34 + i + 2];  // 源顶点（索引 2 开始是边数据）
+            uint source = reverse_blocks[block_idx * 34 + i + 2];
             float source_pr = pr[source];
             uint source_out_degree = out_degrees[source];
             
             if (source_out_degree > 0) {
-                contribution += source_pr / float(source_out_degree);
+                float input = source_pr / float(source_out_degree);
+                float y = input - c;
+                float t = contribution + y;
+                c = (t - contribution) - y;
+                contribution = t;
             }
-            // 如果 source_out_degree == 0，其贡献会在 dangling_contribution 中处理
         }
     }
     
