@@ -145,6 +145,8 @@ pub struct PersistentGraph {
     pub edges: HashMap<(u64, u64), EdgeRecord>,
     /// 文件路径（用于 save()）
     pub file_path: String,
+    /// 索引管理器（可选，默认不启用）
+    pub index_manager: crate::index::IndexManager,
 }
 
 #[derive(Debug, Clone)]
@@ -165,18 +167,68 @@ impl PersistentGraph {
             vertices: HashMap::new(),
             edges: HashMap::new(),
             file_path: path.to_string(),
+            index_manager: crate::index::IndexManager::new(),
         };
 
         if fs::metadata(path).is_ok() {
             g.load()?;
+            // 加载后重建索引（如果有预定义的索引）
+            g.index_manager.rebuild_all(&g.vertices);
         }
 
         Ok(g)
     }
 
-    /// 添加顶点
+    /// 创建索引
+    pub fn create_index(&mut self, name: &str, property_key: &str, unique: bool) -> Result<(), String> {
+        self.index_manager.create_index(
+            name,
+            property_key,
+            crate::index::IndexType::Hash,
+            unique,
+        )?;
+        // 立即从现有数据构建索引
+        self.index_manager.rebuild_property(property_key, &self.vertices);
+        Ok(())
+    }
+
+    /// 删除索引
+    pub fn drop_index(&mut self, name: &str) -> Result<(), String> {
+        self.index_manager.drop_index(name)
+    }
+
+    /// 列出所有索引
+    pub fn list_indexes(&self) -> Vec<crate::index::IndexDef> {
+        self.index_manager.list_indexes()
+    }
+
+    /// 添加顶点（自动维护索引）
     pub fn add_vertex(&mut self, id: u64, properties: HashMap<String, PropertyValue>) {
-        self.vertices.insert(id, VertexRecord { properties });
+        self.vertices.insert(id, VertexRecord { properties: properties.clone() });
+        // 更新索引
+        self.index_manager.on_vertex_added(id, &properties);
+    }
+
+    /// 删除顶点（自动维护索引）
+    pub fn delete_vertex(&mut self, id: u64) {
+        if let Some(vr) = self.vertices.get(&id) {
+            let properties = vr.properties.clone();
+            // 更新索引
+            self.index_manager.on_vertex_deleted(id, &properties);
+            self.vertices.remove(&id);
+        }
+        // 删除相关边
+        self.edges.retain(|(from, to), _| *from != id && *to != id);
+    }
+
+    /// 更新顶点属性（自动维护索引）
+    pub fn update_vertex(&mut self, id: u64, new_properties: HashMap<String, PropertyValue>) {
+        if let Some(vr) = self.vertices.get_mut(&id) {
+            let old_properties = vr.properties.clone();
+            vr.properties = new_properties.clone();
+            // 更新索引
+            self.index_manager.on_vertex_updated(id, &old_properties, &new_properties);
+        }
     }
 
     /// 添加边
@@ -356,6 +408,7 @@ mod tests {
             vertices: HashMap::new(),
             edges: HashMap::new(),
             file_path: test_path.to_string(),
+            index_manager: crate::index::IndexManager::new(),
         };
 
         let mut alice_props = HashMap::new();
@@ -380,6 +433,7 @@ mod tests {
             vertices: HashMap::new(),
             edges: HashMap::new(),
             file_path: test_path.to_string(),
+            index_manager: crate::index::IndexManager::new(),
         };
         g2.load().expect("load failed");
 
@@ -403,6 +457,7 @@ mod tests {
             vertices: HashMap::new(),
             edges: HashMap::new(),
             file_path: test_path.to_string(),
+            index_manager: crate::index::IndexManager::new(),
         };
 
         for i in 0..5u64 {

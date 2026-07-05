@@ -9,6 +9,7 @@ pub mod persistence;
 pub mod query; // Fluent Builder 查询 API
 pub mod transaction; // 事务支持（WAL + 回滚 + 快照隔离）
 pub mod mvcc; // MVCC 快照隔离（Copy-on-Write）
+pub mod index; // 哈希索引（精确匹配）
 // pub mod visualization; // 暂时禁用
 pub mod edge_block; // EdgeBlock 数据结构（CPU 版本，优化缓存利用率）
 pub mod csr_graph; // CSR 格式图（用于 GPU 加速）

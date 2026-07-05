@@ -489,6 +489,7 @@ impl TransactionManager {
             vertices: graph.vertices.clone(),
             edges: graph.edges.clone(),
             file_path: graph.file_path.clone(),
+            index_manager: crate::index::IndexManager::new(),  // 快照不继承索引（可以重建）
         }
     }
 
@@ -515,6 +516,7 @@ mod tests {
             vertices: HashMap::new(),
             edges: HashMap::new(),
             file_path: test_path.to_string(),
+            index_manager: crate::index::IndexManager::new(),
         }
     }
 

@@ -170,6 +170,7 @@ impl MvccGraphHandle {
             vertices: HashMap::new(),
             edges: HashMap::new(),
             file_path: inner.file_path.clone(),
+            index_manager: crate::index::IndexManager::new(),
         };
 
         for (id, vr) in &inner.vertices {
