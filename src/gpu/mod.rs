@@ -12,6 +12,7 @@ pub struct GPUAccelerator {
     device: Device,
     queue: CommandQueue,
     incremental_pr_pipeline: ComputePipelineState,
+    incremental_bfs_pipeline: ComputePipelineState,
 }
 
 impl GPUAccelerator {
@@ -42,10 +43,25 @@ impl GPUAccelerator {
             .new_compute_pipeline_state_with_function(&kernel)
             .map_err(|e| format!("Failed to create compute pipeline: {:?}", e))?;
         
+        // 创建 BFS 管线
+        let bfs_kernel_source = include_str!("incremental_bfs.metal");
+        let bfs_library = device
+            .new_library_with_source(bfs_kernel_source, &options)
+            .map_err(|e| format!("Failed to create BFS Metal library: {:?}", e))?;
+        
+        let bfs_kernel = bfs_library
+            .get_function("incremental_bfs", None)
+            .map_err(|e| format!("Failed to get BFS Metal function: {:?}", e))?;
+        
+        let incremental_bfs_pipeline = device
+            .new_compute_pipeline_state_with_function(&bfs_kernel)
+            .map_err(|e| format!("Failed to create BFS compute pipeline: {:?}", e))?;
+        
         Ok(GPUAccelerator {
             device,
             queue,
             incremental_pr_pipeline,
+            incremental_bfs_pipeline,
         })
     }
     
@@ -131,5 +147,67 @@ impl GPUAccelerator {
         );
         
         buffer
+    }
+    
+    /// 计算增量 BFS（GPU 加速）
+    /// 
+    /// 严格按照 Swift 第 217-279 行实现
+    pub fn compute_incremental_bfs(
+        &self,
+        csr_offsets: &[u32],
+        csr_targets: &[u32],
+        distances: &[u32],
+        affected_vertices: &[u32],
+        vertex_count: u32,
+    ) -> Vec<u32> {
+        let affected_count = affected_vertices.len() as u64;
+        
+        // 创建缓冲区
+        let affected_buffer = self.create_buffer(affected_vertices);
+        let offsets_buffer = self.create_buffer(csr_offsets);
+        let targets_buffer = self.create_buffer(csr_targets);
+        let distances_buffer = self.create_buffer(distances);
+        
+        // 复制当前的距离值
+        let mut new_distances = distances.to_vec();
+        let new_distances_buffer = self.create_buffer(&new_distances);
+        
+        // 创建命令缓冲区和编码器
+        let command_buffer = self.queue.new_command_buffer();
+        let encoder = command_buffer.new_compute_command_encoder();
+        
+        // 设置计算管线状态
+        encoder.set_compute_pipeline_state(&self.incremental_bfs_pipeline);
+        
+        // 设置参数
+        encoder.set_buffer(0, Some(&affected_buffer), 0);
+        
+        let affected_count_u32 = affected_count as u32;
+        encoder.set_bytes(1, std::mem::size_of::<u32>() as u64, &affected_count_u32 as *const u32 as *const c_void);
+        
+        encoder.set_buffer(2, Some(&offsets_buffer), 0);
+        encoder.set_buffer(3, Some(&targets_buffer), 0);
+        encoder.set_buffer(4, Some(&distances_buffer), 0);
+        encoder.set_buffer(5, Some(&new_distances_buffer), 0);
+        encoder.set_bytes(6, std::mem::size_of::<u32>() as u64, &vertex_count as *const u32 as *const c_void);
+        
+        // 调度线程
+        let grid_size = MTLSize::new(affected_count, 1, 1);
+        let threadgroup_size = MTLSize::new(self.incremental_bfs_pipeline.thread_execution_width() as u64, 1, 1);
+        encoder.dispatch_threads(grid_size, threadgroup_size);
+        
+        // 执行
+        encoder.end_encoding();
+        command_buffer.commit();
+        command_buffer.wait_until_completed();
+        
+        // 读取结果
+        let result_ptr = new_distances_buffer.contents() as *const u32;
+        let result_slice = unsafe {
+            std::slice::from_raw_parts(result_ptr, vertex_count as usize)
+        };
+        new_distances.copy_from_slice(result_slice);
+        
+        new_distances
     }
 }

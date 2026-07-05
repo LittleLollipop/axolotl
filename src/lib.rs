@@ -10,6 +10,7 @@ pub mod persistence;
 pub mod edge_block; // EdgeBlock 数据结构（优化缓存利用率）
 pub mod csr_graph; // CSR 格式图（用于 GPU 加速）
 pub mod incremental_pagerank; // CPU/GPU 协同的增量 PageRank
+pub mod incremental_bfs; // CPU/GPU 协同的增量 BFS
 
 // GPU 模块（仅在 macOS 上编译）
 #[cfg(target_os = "macos")]
@@ -22,6 +23,7 @@ pub use persistence::*;
 pub use edge_block::*; // 导出 EdgeBlock
 pub use csr_graph::*; // 导出 CSRGraph
 pub use incremental_pagerank::IncrementalPageRank; // 导出增量 PageRank
+pub use incremental_bfs::IncrementalBFS; // 导出增量 BFS
 
 // 导出 GPU 模块（仅在 macOS 上）
 #[cfg(target_os = "macos")]
