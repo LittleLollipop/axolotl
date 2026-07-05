@@ -1,21 +1,27 @@
 // src/csr_graph.rs
-// CSR (Compressed Sparse Row) 格式的图（用于对比）
+// CSR (Compressed Sparse Row) 格式的图（用于 GPU 加速）
 
 use std::collections::{HashMap, VecDeque};
 
-/// 使用 CSR 格式的图
+/// 使用 CSR 格式的图（使用 u32 索引，与 GPU 兼容）
 #[derive(Debug)]
 pub struct CSRGraph {
     /// 顶点列表
     pub vertices: HashMap<u64, VertexData>,
     /// CSR 格式的偏移数组（vertex_id -> 第一条边在 edges 中的索引）
-    pub offsets: Vec<usize>,
+    /// 使用 u32 索引（与 GPU 兼容）
+    pub offsets: Vec<u32>,
     /// CSR 格式的边数组（所有顶点的边连续存储）
-    pub edges: Vec<u64>,
+    /// 存储的是目标顶点的索引（u32）
+    pub targets: Vec<u32>,
     /// 顶点 ID 到索引的映射
-    pub vertex_to_idx: HashMap<u64, usize>,
+    pub vertex_to_idx: HashMap<u64, u32>,
     /// 索引到顶点 ID 的映射
     pub idx_to_vertex: Vec<u64>,
+    /// 顶点数量
+    pub vertex_count: u32,
+    /// 边的总数
+    pub total_edges: u32,
 }
 
 #[derive(Debug, Clone)]

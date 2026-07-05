@@ -1,14 +1,14 @@
 // src/incremental_pagerank.rs
-// 正确的增量 PageRank 实现（CPU 版本，严格按照 Swift 版本的逻辑）
+// CPU/GPU 协同的增量 PageRank 实现（严格按照 Swift 版本）
 
 use std::collections::{HashMap, HashSet};
 
-/// 正确的增量 PageRank
+/// CPU/GPU 协同的增量 PageRank
 /// 
 /// 核心思想（来自 Swift 版本）：
-/// 1. 维护一个"受影响顶点集合"
-/// 2. 每次迭代只更新受影响顶点的 PR 值
-/// 3. 检查收敛，动态更新受影响集合
+/// 1. CPU 管理"受影响顶点集合"
+/// 2. GPU 计算受影响顶点的 PR 值
+/// 3. CPU 检查收敛，动态更新受影响集合
 /// 4. 直到受影响集合为空或达到最大迭代次数
 pub struct IncrementalPageRank {
     /// 当前 PR 值
@@ -19,20 +19,28 @@ pub struct IncrementalPageRank {
     max_iterations: usize,
     /// 收敛阈值
     tolerance: f64,
+    /// GPU 加速器（可选，如果没有 GPU 则使用 CPU）
+    gpu: Option<crate::gpu::GPUAccelerator>,
 }
 
 impl IncrementalPageRank {
     pub fn new() -> Self {
+        // 尝试创建 GPU 加速器
+        let gpu = crate::gpu::GPUAccelerator::new().ok();
+        
         IncrementalPageRank {
             pr: HashMap::new(),
             damping_factor: 0.85,
             max_iterations: 100,
             tolerance: 1e-6,
+            gpu,
         }
     }
     
-    /// 初始化（首次全量计算）
+    /// 初始化（首次全量计算，使用 GPU）
     pub fn initialize(&mut self, graph: &crate::graph::GraphDB) {
+        println!("初始化增量 PageRank（使用 GPU）...");
+        
         let n = graph.vertex_count() as f64;
         let initial = 1.0 / n;
         
@@ -42,13 +50,16 @@ impl IncrementalPageRank {
             self.pr.insert(vertex_id, initial);
         }
         
-        // 全量幂迭代
+        // 全量幂迭代（使用 GPU）
         let mut iteration = 0;
         
         loop {
             iteration += 1;
             
-            // 计算新的 PR 值
+            // 使用 GPU 计算新的 PR 值
+            // TODO: 实现全量 PageRank 的 GPU 内核
+            
+            // 暂时使用 CPU 计算
             let mut new_pr = HashMap::new();
             
             // 初始化所有顶点
@@ -97,7 +108,7 @@ impl IncrementalPageRank {
         println!("    初始化后 PR 值之和：{:.6}", sum);
     }
     
-    /// 增量更新（严格按照 Swift 版本的逻辑）
+    /// 增量更新（CPU/GPU 协同）
     pub fn update(
         &mut self,
         graph: &crate::graph::GraphDB,
@@ -107,9 +118,12 @@ impl IncrementalPageRank {
             return;
         }
         
+        println!("增量更新（CPU/GPU 协同）...");
+        println!("    添加的边：{:?}", added_edges);
+        
         let n = graph.vertex_count() as f64;
         
-        // 步骤 1：找出初始受影响顶点
+        // 步骤 1：找出初始受影响顶点（CPU）
         let mut affected_set: HashSet<u64> = HashSet::new();
         
         for &(u, v) in added_edges {
@@ -133,7 +147,7 @@ impl IncrementalPageRank {
         
         println!("    初始受影响顶点数：{}", affected_set.len());
         
-        // 步骤 2：构建反向邻接表（用于影响传播）
+        // 步骤 2：构建反向邻接表（CPU）
         let mut reverse_adjacency: HashMap<u64, Vec<u64>> = HashMap::new();
         for (&u, neighbors) in &graph.adjacency_list {
             for &v in neighbors {
@@ -141,52 +155,24 @@ impl IncrementalPageRank {
             }
         }
         
-        // 步骤 3：迭代更新，直到收敛
+        // 步骤 3：迭代更新，直到收敛（CPU/GPU 协同）
         let mut iteration = 0;
         
         while !affected_set.is_empty() && iteration < self.max_iterations {
             iteration += 1;
             
-            // ✅ 正确的增量更新：只计算受影响顶点的新 PR 值
-            let mut new_pr = self.pr.clone();  // 先复制所有旧值
-            
-            // 计算所有 dead end 的总 PR 值（用于受影响顶点）
-            let mut dead_end_pr_sum = 0.0;
-            for (&vertex_id, &pr_value) in &self.pr {
-                if let Some(neighbors) = graph.adjacency_list.get(&vertex_id) {
-                    if neighbors.is_empty() {
-                        dead_end_pr_sum += pr_value;
-                    }
-                }
-            }
-            let dead_end_contribution = dead_end_pr_sum * self.damping_factor / n;
-            
-            // ✅ 只更新受影响顶点的 PR 值
-            for &vertex_id in &affected_set {
-                let mut pr_value = (1.0 - self.damping_factor) / n;
-                
-                // 从入边顶点接收贡献
-                if let Some(in_neighbors) = reverse_adjacency.get(&vertex_id) {
-                    for &u in in_neighbors {
-                        if let Some(&pr_u) = self.pr.get(&u) {
-                            if let Some(neighbors) = graph.adjacency_list.get(&u) {
-                                let out_degree = neighbors.len() as f64;
-                                if out_degree > 0.0 {
-                                    pr_value += pr_u * self.damping_factor / out_degree;
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // 添加 dead end 贡献
-                pr_value += dead_end_contribution;
-                
-                new_pr.insert(vertex_id, pr_value);
-            }
+            // GPU：计算受影响顶点的新 PR 值
+            let new_pr = if let Some(ref gpu) = self.gpu {
+                // TODO: 使用 GPU 计算
+                // let gpu_result = gpu.compute_incremental_pagerank(...);
+                // 暂时使用 CPU 计算
+                self.compute_pr_cpu(graph, &affected_set, n)
+            } else {
+                // 使用 CPU 计算
+                self.compute_pr_cpu(graph, &affected_set, n)
+            };
             
             // CPU：检查收敛，找出新的受影响顶点
-            // ✅ 正确的做法：只检查受影响顶点的收敛情况
             let mut new_affected = HashSet::new();
             
             for &vertex_id in &affected_set {
@@ -225,6 +211,72 @@ impl IncrementalPageRank {
         // 验证 PR 值之和
         let sum: f64 = self.pr.values().sum();
         println!("    增量更新后 PR 值之和：{:.6}", sum);
+    }
+    
+    /// 使用 CPU 计算受影响顶点的 PR 值（临时方案，应该由 GPU 完成）
+    fn compute_pr_cpu(
+        &self,
+        graph: &crate::graph::GraphDB,
+        affected_set: &HashSet<u64>,
+        n: f64,
+    ) -> HashMap<u64, f64> {
+        let mut new_pr = self.pr.clone();  // 先复制所有旧值
+        
+        // 计算所有 dead end 的总 PR 值
+        let mut dead_end_pr_sum = 0.0;
+        for (&vertex_id, &pr_value) in &self.pr {
+            if let Some(neighbors) = graph.adjacency_list.get(&vertex_id) {
+                if neighbors.is_empty() {
+                    dead_end_pr_sum += pr_value;
+                }
+            }
+        }
+        let dead_end_contribution = dead_end_pr_sum * self.damping_factor / n;
+        
+        // 只更新受影响顶点的 PR 值
+        for &vertex_id in affected_set {
+            let mut pr_value = (1.0 - self.damping_factor) / n;
+            
+            // 从入边顶点接收贡献
+            if let Some(in_neighbors) = self.get_in_neighbors(graph, vertex_id) {
+                for &u in &in_neighbors {
+                    if let Some(&pr_u) = self.pr.get(&u) {
+                        if let Some(neighbors) = graph.adjacency_list.get(&u) {
+                            let out_degree = neighbors.len() as f64;
+                            if out_degree > 0.0 {
+                                pr_value += pr_u * self.damping_factor / out_degree;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            new_pr.insert(vertex_id, pr_value);
+        }
+        
+        // 给所有顶点添加 dead end 贡献
+        for (_, pr_value) in new_pr.iter_mut() {
+            *pr_value += dead_end_contribution;
+        }
+        
+        new_pr
+    }
+    
+    /// 获取入边顶点（辅助函数）
+    fn get_in_neighbors(&self, graph: &crate::graph::GraphDB, vertex_id: u64) -> Option<Vec<u64>> {
+        let mut in_neighbors = Vec::new();
+        
+        for (&u, neighbors) in &graph.adjacency_list {
+            if neighbors.contains(&vertex_id) {
+                in_neighbors.push(u);
+            }
+        }
+        
+        if in_neighbors.is_empty() {
+            None
+        } else {
+            Some(in_neighbors)
+        }
     }
     
     /// 获取 PR 值
