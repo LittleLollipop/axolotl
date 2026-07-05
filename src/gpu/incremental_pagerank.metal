@@ -1,5 +1,5 @@
 // src/gpu/incremental_pagerank.metal
-// 增量 PageRank 的 GPU 内核（来自 Swift 版本）
+// 增量 PageRank 的 GPU 内核（使用反向 CSR）
 
 #include <metal_stdlib>
 using namespace metal;
@@ -8,11 +8,12 @@ using namespace metal;
 kernel void incremental_pagerank(
     device const uint *affected_vertices [[buffer(0)]],
     device const uint &affected_count [[buffer(1)]],
-    device const uint *offsets [[buffer(2)]],
-    device const uint *targets [[buffer(3)]],
-    device const float *pr [[buffer(4)]],
-    device float *new_pr [[buffer(5)]],
-    constant uint &vertex_count [[buffer(6)]],
+    device const uint *reverse_offsets [[buffer(2)]],  // 反向 CSR 的偏移数组
+    device const uint *reverse_targets [[buffer(3)]],  // 反向 CSR 的边数组
+    device const uint *offsets [[buffer(4)]],  // 正向 CSR 的偏移数组（用于获取出度）
+    device const float *pr [[buffer(5)]],
+    device float *new_pr [[buffer(6)]],
+    constant uint &vertex_count [[buffer(7)]],
     uint gid [[thread_position_in_grid]]
 ) {
     if (gid >= affected_count) return;
@@ -20,15 +21,19 @@ kernel void incremental_pagerank(
     uint v = affected_vertices[gid];
     if (v >= vertex_count) return;
     
+    // 使用反向 CSR 找出 v 的入边邻居
     float contribution = 0.0f;
-    uint start = offsets[v];
-    uint end = offsets[v + 1];
+    uint start = reverse_offsets[v];
+    uint end = reverse_offsets[v + 1];
     
     for (uint i = start; i < end; i++) {
-        uint neighbor = targets[i];
+        uint neighbor = reverse_targets[i];  // 有边从 neighbor 指向 v
+        
+        // 使用正向 CSR 获取 neighbor 的出度
         uint neighbor_start = offsets[neighbor];
         uint neighbor_end = offsets[neighbor + 1];
         uint out_degree = neighbor_end - neighbor_start;
+        
         if (out_degree > 0) {
             contribution += pr[neighbor] / float(out_degree);
         }

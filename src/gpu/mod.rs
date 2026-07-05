@@ -56,6 +56,8 @@ impl GPUAccelerator {
         &self,
         csr_offsets: &[u32],
         csr_targets: &[u32],
+        reverse_offsets: &[u32],  // 反向 CSR 的偏移数组
+        reverse_targets: &[u32],  // 反向 CSR 的边数组
         pr: &[f32],
         affected_vertices: &[u32],
         vertex_count: u32,
@@ -64,11 +66,13 @@ impl GPUAccelerator {
         
         // Swift 第 316-321 行：创建缓冲区
         let affected_buffer = self.create_buffer(affected_vertices);
+        let reverse_offsets_buffer = self.create_buffer(reverse_offsets);
+        let reverse_targets_buffer = self.create_buffer(reverse_targets);
         let offsets_buffer = self.create_buffer(csr_offsets);
-        let targets_buffer = self.create_buffer(csr_targets);
         let pr_buffer = self.create_buffer(pr);
         
-        let mut new_pr = vec![0.0f32; vertex_count as usize];
+        // Swift 第 314 行：复制当前的 PR 值
+        let mut new_pr = pr.to_vec();
         let new_pr_buffer = self.create_buffer(&new_pr);
         
         // Swift 第 323-324 行：创建命令缓冲区和编码器
@@ -84,11 +88,12 @@ impl GPUAccelerator {
         let affected_count_u32 = affected_count as u32;
         encoder.set_bytes(1, std::mem::size_of::<u32>() as u64, &affected_count_u32 as *const u32 as *const c_void);
         
-        encoder.set_buffer(2, Some(&offsets_buffer), 0);
-        encoder.set_buffer(3, Some(&targets_buffer), 0);
-        encoder.set_buffer(4, Some(&pr_buffer), 0);
-        encoder.set_buffer(5, Some(&new_pr_buffer), 0);
-        encoder.set_bytes(6, std::mem::size_of::<u32>() as u64, &vertex_count as *const u32 as *const c_void);
+        encoder.set_buffer(2, Some(&reverse_offsets_buffer), 0);
+        encoder.set_buffer(3, Some(&reverse_targets_buffer), 0);
+        encoder.set_buffer(4, Some(&offsets_buffer), 0);
+        encoder.set_buffer(5, Some(&pr_buffer), 0);
+        encoder.set_buffer(6, Some(&new_pr_buffer), 0);
+        encoder.set_bytes(7, std::mem::size_of::<u32>() as u64, &vertex_count as *const u32 as *const c_void);
         
         // Swift 第 334-336 行：调度线程
         let grid_size = MTLSize::new(affected_count, 1, 1);

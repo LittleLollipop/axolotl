@@ -55,16 +55,18 @@ impl IncrementalPageRank {
         let mut pr = initial_pr.to_vec();
         let vertex_count = csr.vertex_count as usize;
         
-        // Swift 第 292-300 行：构建反向邻接表
-        let mut reverse_adjacency = vec![Vec::new(); vertex_count];
-        for u in 0..vertex_count {
-            let start = csr.offsets[u] as usize;
-            let end = csr.offsets[u + 1] as usize;
-            for i in start..end {
-                let v = csr.targets[i] as usize;
-                reverse_adjacency[v].push(u as u32);
-            }
+    // 构建正向邻接表（出边）和反向邻接表（入边）
+    let mut forward_adjacency = vec![Vec::new(); vertex_count];  // 出边邻居
+    let mut reverse_adjacency = vec![Vec::new(); vertex_count];  // 入边邻居
+    for u in 0..vertex_count {
+        let start = csr.offsets[u] as usize;
+        let end = csr.offsets[u + 1] as usize;
+        for i in start..end {
+            let v = csr.targets[i] as usize;
+            forward_adjacency[u].push(v as u32);  // u 指向 v
+            reverse_adjacency[v].push(u as u32);   // v 的入边来自 u
         }
+    }
         
         // Swift 第 303-304 行：初始化受影响顶点集合
         let mut affected_set: HashSet<u32> = affected_vertices.iter().cloned().collect();
@@ -89,6 +91,8 @@ impl IncrementalPageRank {
             let updated_pr = self.gpu.compute_incremental_pagerank(
                 &csr.offsets,
                 &csr.targets,
+                &csr.reverse_offsets,  // 反向 CSR
+                &csr.reverse_targets,  // 反向 CSR
                 &pr,
                 &affected_array,
                 csr.vertex_count,
@@ -99,8 +103,8 @@ impl IncrementalPageRank {
             for i in 0..vertex_count {
                 let diff = (updated_pr[i] - pr[i]).abs();
                 if diff > self.tolerance {
-                    // Swift 第 350-352 行：传播给邻居
-                    for &neighbor in &reverse_adjacency[i] {
+                    // 这个顶点的 PR 值变化了，需要传播给出边邻居
+                    for &neighbor in &forward_adjacency[i] {
                         new_affected.insert(neighbor);
                     }
                 }
@@ -158,21 +162,71 @@ mod tests {
         let edges = vec![(0, 1), (0, 2), (1, 2), (2, 0), (3, 4)];
         csr.build_csr(&edges);
         
-        // 初始 PR 值
+        // 初始 PR 值（均匀分布）
         let initial_pr = vec![1.0 / 5.0; 5];
         
-        // 受影响顶点：0, 1
-        let affected_vertices = vec![0, 1];
+        // 测试 1：计算完整的 PageRank（传入所有顶点作为受影响顶点）
+        println!("\n测试 1：计算完整的 PageRank（所有顶点都受影响）");
+        let all_vertices = vec![0, 1, 2, 3, 4];
+        let full_pr = incremental_pr.compute(&csr, &initial_pr, &all_vertices);
         
-        // 计算增量 PageRank
-        let new_pr = incremental_pr.compute(&csr, &initial_pr, &affected_vertices);
+        // 测试 2：计算完整的 PageRank（CPU 版本，用于验证）
+        println!("\n测试 2：计算完整的 PageRank（CPU 版本）");
+        let cpu_pr = compute_full_pagerank_cpu(&csr, &initial_pr, 100);
         
-        // 验证 PR 值之和接近 1.0
-        let sum: f32 = new_pr.iter().sum();
-        println!("PR 值之和：{}", sum);
+        // 对比结果
+        println!("\n对比 GPU 和 CPU 的结果：");
+        let mut max_diff = 0.0f32;
+        for i in 0..5 {
+            let diff = (full_pr[i] - cpu_pr[i]).abs();
+            if diff > max_diff {
+                max_diff = diff;
+            }
+            println!("  顶点 {}：GPU = {:.6}, CPU = {:.6}, 差异 = {:.6}", 
+                     i, full_pr[i], cpu_pr[i], diff);
+        }
         
-        assert!((sum - 1.0).abs() < 0.01, "PR 值之和应该接近 1.0");
+        println!("\n最大差异：{:.6}", max_diff);
         
-        println!("✅ 增量 PageRank 测试通过！");
+        // 验证：GPU 和 CPU 的结果应该非常接近
+        assert!(max_diff < 1e-4, "GPU 和 CPU 的 PageRank 结果差异过大");
+        
+        println!("\n✅ 增量 PageRank 测试通过！");
     }
+}
+
+/// CPU 版本的完整 PageRank（用于验证）
+fn compute_full_pagerank_cpu(
+    csr: &CSRGraph,
+    initial_pr: &[f32],
+    iterations: usize,
+) -> Vec<f32> {
+    let vertex_count = csr.vertex_count as usize;
+    let mut pr = initial_pr.to_vec();
+    let damping = 0.85f32;
+    
+    for _ in 0..iterations {
+        let mut new_pr = vec![0.0; vertex_count];
+        
+        // 使用反向 CSR 找出每个顶点的入边邻居
+        for v in 0..vertex_count {
+            let mut contribution = 0.0f32;
+            let start = csr.reverse_offsets[v] as usize;
+            let end = csr.reverse_offsets[v + 1] as usize;
+            
+            for i in start..end {
+                let u = csr.reverse_targets[i] as usize;  // 有边从 u 指向 v
+                let out_degree = (csr.offsets[u + 1] - csr.offsets[u]) as f32;
+                if out_degree > 0.0 {
+                    contribution += pr[u] / out_degree;
+                }
+            }
+            
+            new_pr[v] = (1.0 - damping) / vertex_count as f32 + damping * contribution;
+        }
+        
+        pr = new_pr;
+    }
+    
+    pr
 }

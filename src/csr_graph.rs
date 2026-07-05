@@ -34,6 +34,11 @@ pub struct CSRGraph {
     /// 
     /// 对应 Swift 版本的 totalEdges 字段
     pub total_edges: u32,
+    /// 反向 CSR 的偏移数组（存储入边）
+    /// reverse_offsets[v] 到 reverse_offsets[v+1] 是 v 的入边
+    pub reverse_offsets: Vec<u32>,
+    /// 反向 CSR 的边数组（存储入边的源顶点）
+    pub reverse_targets: Vec<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +62,8 @@ impl CSRGraph {
             vertices: HashMap::new(),
             offsets: Vec::new(),
             targets: Vec::new(),
+            reverse_offsets: Vec::new(),  // 初始化反向 CSR
+            reverse_targets: Vec::new(),  // 初始化反向 CSR
             vertex_to_idx: HashMap::new(),
             idx_to_vertex: Vec::new(),
             vertex_count: 0,
@@ -122,6 +129,45 @@ impl CSRGraph {
         // 更新顶点数和边数
         self.vertex_count = n as u32;
         self.total_edges = edges.len() as u32;
+        
+        // 构建反向 CSR（存储入边）
+        let vertex_to_idx_clone = self.vertex_to_idx.clone();  // 克隆一份，避免借用冲突
+        self.build_reverse_csr(edges, &vertex_to_idx_clone);
+    }
+    
+    /// 构建反向 CSR（存储入边）
+    fn build_reverse_csr(&mut self, edges: &[(u64, u64)], vertex_to_idx: &HashMap<u64, u32>) {
+        let n = self.vertex_count as usize;
+        
+        // 统计每个顶点的入边数
+        let mut in_degrees = vec![0; n];
+        for &(_, to) in edges {
+            if let Some(&idx) = vertex_to_idx.get(&to) {
+                in_degrees[idx as usize] += 1;
+            }
+        }
+        
+        // 构建反向偏移数组
+        self.reverse_offsets = vec![0; n + 1];
+        for i in 0..n {
+            self.reverse_offsets[i + 1] = self.reverse_offsets[i] + in_degrees[i];
+        }
+        
+        // 填充反向边数组
+        let mut current_offset: Vec<u32> = self.reverse_offsets[0..n].to_vec();
+        self.reverse_targets = vec![0; self.reverse_offsets[n] as usize];
+        
+        for &(from, to) in edges {
+            if let Some(&to_idx) = vertex_to_idx.get(&to) {
+                let offset = current_offset[to_idx as usize];
+                
+                // 转换成索引
+                if let Some(&from_idx) = vertex_to_idx.get(&from) {
+                    self.reverse_targets[offset as usize] = from_idx;
+                    current_offset[to_idx as usize] += 1;
+                }
+            }
+        }
     }
 }
 
