@@ -1,2 +1,24 @@
-/target
+# Rust
 target/
+**/target/
+
+# Swift
+.build/
+DerivedData/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Datasets (large files)
+*.edgelist
+*.csv
+
+# Logs
+*.log
