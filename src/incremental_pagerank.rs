@@ -120,7 +120,7 @@ impl IncrementalPageRank {
         
         // Swift 第 365-366 行：打印耗时
         let elapsed = start_time.elapsed();
-        println!("    增量 PageRank：{} 次迭代，{:.2f} ms", 
+        println!("    增量 PageRank：{} 次迭代，{:.2} ms", 
                  iteration, elapsed.as_secs_f64() * 1000.0);
         
         // Swift 第 368 行：返回结果
