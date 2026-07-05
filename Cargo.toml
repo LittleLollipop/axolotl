@@ -1,0 +1,51 @@
+[package]
+name = "axolotl-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 高性能图论库
+petgraph = { version = "0.6", features = ["serde"] }
+
+# 序列化/反序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 错误处理
+thiserror = "1.0"
+
+# 时间戳
+chrono = "0.4"
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# 并发（用于增量算法）
+rayon = "1.7"
+
+# 数值计算（用于 PageRank 等）
+ndarray = "0.15"
+num-traits = "0.2"
+
+# 随机数（用于近似算法）
+rand = "0.8"
+
+# GPU 支持（Metal on macOS）
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = "0.29"
+dispatch = "0.2"
+
+[dev-dependencies]
+# 基准测试
+criterion = "0.5"
+
+# 测试
+proptest = "1.4"
+
+# 随机图生成（用于基准测试）
+rand = "0.8"
+
+[[bench]]
+name = "graph_benchmark"
+harness = false
