@@ -7,10 +7,16 @@ pub mod graph;
 pub mod algorithms;
 pub mod persistence;
 // pub mod visualization; // 暂时禁用
-pub mod edge_block; // EdgeBlock 数据结构（优化缓存利用率）
+pub mod edge_block; // EdgeBlock 数据结构（CPU 版本，优化缓存利用率）
 pub mod csr_graph; // CSR 格式图（用于 GPU 加速）
+pub mod gpu_edge_block; // GPU EdgeBlock 格式（扁平化数组，适配 GPU）
 pub mod incremental_pagerank; // CPU/GPU 协同的增量 PageRank
 pub mod incremental_bfs; // CPU/GPU 协同的增量 BFS
+pub mod incremental_bfs_edgeblock; // CPU/GPU 协同的增量 BFS（使用 EdgeBlock 格式）
+pub mod incremental_sssp; // CPU/GPU 协同的增量 SSSP
+pub mod incremental_sssp_edgeblock; // CPU/GPU 协同的增量 SSSP（使用 EdgeBlock 格式）
+pub mod incremental_cc; // 增量 Connected Components（使用 Union-Find）
+pub mod incremental_tc; // 增量 Triangle Counting（三角形计数）
 
 // GPU 模块（仅在 macOS 上编译）
 #[cfg(target_os = "macos")]
@@ -22,8 +28,12 @@ pub use persistence::*;
 // pub use visualization::*;
 pub use edge_block::*; // 导出 EdgeBlock
 pub use csr_graph::*; // 导出 CSRGraph
-pub use incremental_pagerank::IncrementalPageRank; // 导出增量 PageRank
+pub use incremental_pagerank::IncrementalPageRank_EdgeBlock; // 导出增量 PageRank (EdgeBlock)
 pub use incremental_bfs::IncrementalBFS; // 导出增量 BFS
+pub use incremental_bfs_edgeblock::IncrementalBFS_EdgeBlock; // 导出增量 BFS (EdgeBlock)
+pub use incremental_sssp::IncrementalSSSP; // 导出增量 SSSP
+pub use incremental_sssp_edgeblock::IncrementalSSSP_EdgeBlock; // 导出增量 SSSP (EdgeBlock)
+pub use incremental_cc::IncrementalCC; // 导出增量 Connected ComponentsP
 
 // 导出 GPU 模块（仅在 macOS 上）
 #[cfg(target_os = "macos")]

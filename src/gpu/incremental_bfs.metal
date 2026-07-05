@@ -2,10 +2,7 @@
 // 增量 BFS 的 GPU 内核
 
 #include <metal_stdlib>
-#include <metal_limits>
 using namespace metal;
-
-constant uint INF = UINT32_MAX;
 
 // GPU kernel: Update distances for affected vertices only
 kernel void incremental_bfs(
@@ -25,7 +22,7 @@ kernel void incremental_bfs(
     
     // 读取 v 的当前距离
     uint v_dist = distances[v];
-    if (v_dist == INF) return;  // v 不可达
+    if (v_dist == uint(0xFFFFFFFF)) return;  // v 不可达（使用最大值）
     
     uint start = offsets[v];
     uint end = offsets[v + 1];
