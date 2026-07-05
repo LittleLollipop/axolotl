@@ -1,51 +1,52 @@
-# Axolotl 图数据库项目
+# Axolotl Graph Database Project
 
-高性能图数据库，支持增量算法和 GPU 加速。
+High-performance graph database with incremental algorithms and GPU acceleration.
 
-## 项目结构
+## Project Structure
 
 ```
 axolotl/
-├── 核心研究/           # 实验报告、算法研究、性能测试
-│   ├── 实验报告/       # 实验记录和结果
-│   ├── 算法研究/       # 算法设计和分析
-│   └── 性能测试/       # 性能基准测试
-├── 原型-swift/        # Swift 原型（参考实现）
-├── 原型-rust/         # Rust 实现（当前开发版本）
-└── docs/              # 项目文档
+├── core-research/          # Research reports, algorithm studies, performance tests
+│   ├── experiment-reports/ # Experiment records and results
+│   ├── algorithm-research/ # Algorithm design and analysis
+│   ├── performance-tests/  # Performance benchmarks
+│   └── docs/              # Technical documentation
+├── prototype-swift/       # Swift prototype (reference implementation)
+├── prototype-rust/        # Rust implementation (current development)
+└── README.md             # This file
 ```
 
-## 快速开始
+## Quick Start
 
-### Rust 版本（推荐）
+### Rust Version (Recommended)
 
 ```bash
-cd 原型-rust
+cd prototype-rust
 cargo build --release
 cargo run --release --example test_pagerank_fix
 ```
 
-### Swift 版本（参考）
+### Swift Version (Reference)
 
 ```bash
-cd 原型-swift
+cd prototype-swift
 swift build
 swift run
 ```
 
-## 核心特性
+## Core Features
 
-- ✅ **增量算法**：只更新受影响的顶点（PageRank、BFS、SSSP）
-- ✅ **GPU 加速**：使用 Metal 加速计算（macOS）
-- ✅ **EdgeBlock 数据结构**：优化缓存利用率
-- ✅ **CPU/GPU 协同**：统一内存，高效并发
+- ✅ **Incremental Algorithms**: Only update affected vertices (PageRank, BFS, SSSP)
+- ✅ **GPU Acceleration**: Use Metal for computation (macOS)
+- ✅ **EdgeBlock Data Structure**: Optimized cache utilization
+- ✅ **CPU/GPU Collaboration**: Unified memory, efficient concurrency
 
-## 文档
+## Documentation
 
-- [项目原则](核心研究/算法研究/PROJECT_PRINCIPLES.md)
-- [增量 PageRank 状态](核心研究/实验报告/INCREMENTAL_PR_STATUS.md)
-- [性能对比](核心研究/性能测试/PERFORMANCE_COMPARISON.md)
+- [Project Principles](core-research/algorithm-research/PROJECT_PRINCIPLES.md)
+- [Incremental PageRank Status](core-research/experiment-reports/INCREMENTAL_PR_STATUS.md)
+- [Performance Comparison](core-research/performance-tests/PERFORMANCE_COMPARISON.md)
 
-## 许可证
+## License
 
 MIT
