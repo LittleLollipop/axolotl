@@ -13,7 +13,7 @@ using namespace metal;
 /// - affected_count: 受影响顶点数量
 /// - vertices: 每个顶点的第一个 EdgeBlock 索引（出边）
 /// - block_counts: 每个顶点的 EdgeBlock 数量
-/// - blocks: 扁平化的 EdgeBlock 数据
+/// - blocks: 扁平化的 EdgeBlock 数据（每个 block 是 34 个 u32）
 /// - distances: 当前距离数组
 /// - new_distances: 输出：新的距离数组
 /// - vertex_count: 顶点数量
@@ -22,7 +22,7 @@ kernel void sssp_edgeblock_unweighted(
     device const uint &affected_count [[buffer(1)]],
     device const uint *vertices [[buffer(2)]],
     device const uint *block_counts [[buffer(3)]],
-    device const uint (*blocks)[34] [[buffer(4)]],
+    device const uint *blocks [[buffer(4)]],  // 扁平化数组，每个 block 34 个 u32
     device const uint *distances [[buffer(5)]],
     device uint *new_distances [[buffer(6)]],
     constant uint &vertex_count [[buffer(7)]],
@@ -42,10 +42,10 @@ kernel void sssp_edgeblock_unweighted(
     
     for (uint b = 0; b < count; b++) {
         uint block_idx = start + b;
-        uint edge_count = blocks[block_idx][1];  // edgeCount
+        uint edge_count = blocks[block_idx * 34 + 1];  // edgeCount（每个 block 34 个 u32，索引 1 是 edgeCount）
         
         for (uint i = 0; i < edge_count; i++) {
-            uint neighbor = blocks[block_idx][i + 2];  // 目标顶点
+            uint neighbor = blocks[block_idx * 34 + i + 2];  // 目标顶点（索引 2 开始是边数据）
             
             // 无权图：权重 = 1
             uint new_dist = v_dist + 1;

@@ -17,6 +17,7 @@ pub struct GPUAccelerator {
     incremental_sssp_pipeline: ComputePipelineState,  // SSSP 管线
     pagerank_edgeblock_pipeline: ComputePipelineState,  // PageRank EdgeBlock 管线
     sssp_edgeblock_pipeline: ComputePipelineState,  // SSSP EdgeBlock 管线
+    pagerank_full_pipeline: ComputePipelineState,  // PageRank 全量管线
 }
 
 impl GPUAccelerator {
@@ -117,6 +118,20 @@ impl GPUAccelerator {
             .new_compute_pipeline_state_with_function(&sssp_edgeblock_kernel)
             .map_err(|e| format!("Failed to create SSSP EdgeBlock compute pipeline: {:?}", e))?;
         
+        // 创建 PageRank 全量管线
+        let pagerank_full_kernel_source = include_str!("pagerank_full.metal");
+        let pagerank_full_library = device
+            .new_library_with_source(pagerank_full_kernel_source, &options)
+            .map_err(|e| format!("Failed to create PageRank Full Metal library: {:?}", e))?;
+        
+        let pagerank_full_kernel = pagerank_full_library
+            .get_function("pagerank_full", None)
+            .map_err(|e| format!("Failed to get PageRank Full Metal function: {:?}", e))?;
+        
+        let pagerank_full_pipeline = device
+            .new_compute_pipeline_state_with_function(&pagerank_full_kernel)
+            .map_err(|e| format!("Failed to create PageRank Full compute pipeline: {:?}", e))?;
+        
         Ok(GPUAccelerator {
             device,
             queue,
@@ -126,6 +141,7 @@ impl GPUAccelerator {
             incremental_sssp_pipeline,
             pagerank_edgeblock_pipeline,
             sssp_edgeblock_pipeline,
+            pagerank_full_pipeline,
         })
     }
     
@@ -572,6 +588,16 @@ impl GPUAccelerator {
         let affected_count = affected_vertices.len() as u64;
         let vertex_count = gpu_edge_block.vertex_count as usize;
         
+        // 计算悬挂顶点的贡献（CPU 端计算）
+        // 悬挂顶点：出度为 0 的顶点
+        // 其 PR 值应该均匀分布到所有顶点
+        let dangling_sum: f32 = pr.iter()
+            .enumerate()
+            .filter(|(v, _)| out_degrees[*v] == 0)
+            .map(|(_, pr_val)| *pr_val)
+            .sum();
+        let dangling_contribution = dangling_sum / vertex_count as f32;
+        
         // 创建缓冲区
         let affected_buffer = self.create_buffer(affected_vertices);
         let reverse_vertices_buffer = self.create_buffer(&gpu_edge_block.reverse_vertices);
@@ -579,6 +605,10 @@ impl GPUAccelerator {
         let reverse_blocks_buffer = self.create_buffer(&gpu_edge_block.reverse_blocks);
         let pr_buffer = self.create_buffer(pr);
         let out_degrees_buffer = self.create_buffer(out_degrees);
+        
+        // 创建 dangling_contribution 缓冲区（长度为 1）
+        let dangling_contribution_vec = vec![dangling_contribution];
+        let dangling_contribution_buffer = self.create_buffer(&dangling_contribution_vec);
         
         // 复制当前的 PR 值
         let mut new_pr = pr.to_vec();
@@ -591,7 +621,19 @@ impl GPUAccelerator {
         // 设置计算管线状态
         encoder.set_compute_pipeline_state(&self.pagerank_edgeblock_pipeline);
         
-        // 设置参数
+        // 设置参数（对应 pagerank_edgeblock_optimized 内核）
+        // buffer(0): affected_vertices
+        // buffer(1): affected_count (constant)
+        // buffer(2): reverse_vertices
+        // buffer(3): reverse_block_counts
+        // buffer(4): reverse_blocks
+        // buffer(5): pr
+        // buffer(6): new_pr
+        // buffer(7): out_degrees
+        // buffer(8): damping_factor (constant)
+        // buffer(9): vertex_count (constant)
+        // buffer(10): dangling_contribution
+        
         encoder.set_buffer(0, Some(&affected_buffer), 0);
         
         let affected_count_u32 = affected_count as u32;
@@ -608,6 +650,8 @@ impl GPUAccelerator {
         
         let vertex_count_u32 = vertex_count as u32;
         encoder.set_bytes(9, std::mem::size_of::<u32>() as u64, &vertex_count_u32 as *const u32 as *const c_void);
+        
+        encoder.set_buffer(10, Some(&dangling_contribution_buffer), 0);
         
         // 调度线程
         let grid_size = MTLSize::new(affected_count, 1, 1);
@@ -697,5 +741,100 @@ impl GPUAccelerator {
         new_distances.copy_from_slice(result_slice);
         
         new_distances
+    }
+    
+    /// 计算全量 PageRank（GPU 加速，正确处理悬挂顶点）
+    /// 
+    /// 参数：
+    /// - reverse_offsets: 反向 CSR 偏移数组（入边）
+    /// - reverse_targets: 反向 CSR 目标数组（入边源顶点）
+    /// - out_degrees: 每个顶点的出度
+    /// - pr: 当前 PR 值
+    /// - vertex_count: 顶点数量
+    /// - damping_factor: 阻尼因子
+    /// 
+    /// 返回：更新后的 PR 值
+    pub fn compute_full_pagerank(
+        &self,
+        reverse_offsets: &[u32],
+        reverse_targets: &[u32],
+        out_degrees: &[u32],
+        pr: &[f32],
+        vertex_count: u32,
+        damping_factor: f32,
+    ) -> Vec<f32> {
+        let vertex_count_usize = vertex_count as usize;
+        
+        // 计算悬挂顶点的贡献（CPU 端计算）
+        // 悬挂顶点：出度为 0 的顶点
+        // 其 PR 值应该均匀分布到所有顶点
+        let dangling_sum: f32 = pr.iter()
+            .enumerate()
+            .filter(|(v, _)| out_degrees[*v] == 0)
+            .map(|(_, pr_val)| *pr_val)
+            .sum();
+        let dangling_contribution = dangling_sum / vertex_count as f32;
+        
+        // 创建缓冲区
+        let reverse_offsets_buffer = self.create_buffer(reverse_offsets);
+        let reverse_targets_buffer = self.create_buffer(reverse_targets);
+        let out_degrees_buffer = self.create_buffer(out_degrees);
+        let pr_buffer = self.create_buffer(pr);
+        
+        // 创建 dangling_contribution 缓冲区（长度为 1）
+        let dangling_contribution_vec = vec![dangling_contribution];
+        let dangling_contribution_buffer = self.create_buffer(&dangling_contribution_vec);
+        
+        // 复制当前的 PR 值
+        let mut new_pr = pr.to_vec();
+        let new_pr_buffer = self.create_buffer(&new_pr);
+        
+        // 创建命令缓冲区和编码器
+        let command_buffer = self.queue.new_command_buffer();
+        let encoder = command_buffer.new_compute_command_encoder();
+        
+        // 设置计算管线状态
+        encoder.set_compute_pipeline_state(&self.pagerank_full_pipeline);
+        
+        // 设置参数（对应 pagerank_full 内核）
+        // buffer(0): reverse_offsets
+        // buffer(1): reverse_targets
+        // buffer(2): out_degrees
+        // buffer(3): pr
+        // buffer(4): new_pr
+        // buffer(5): damping_factor (constant)
+        // buffer(6): vertex_count (constant)
+        // buffer(7): dangling_contribution
+        
+        encoder.set_buffer(0, Some(&reverse_offsets_buffer), 0);
+        encoder.set_buffer(1, Some(&reverse_targets_buffer), 0);
+        encoder.set_buffer(2, Some(&out_degrees_buffer), 0);
+        encoder.set_buffer(3, Some(&pr_buffer), 0);
+        encoder.set_buffer(4, Some(&new_pr_buffer), 0);
+        
+        encoder.set_bytes(5, std::mem::size_of::<f32>() as u64, &damping_factor as *const f32 as *const c_void);
+        
+        encoder.set_bytes(6, std::mem::size_of::<u32>() as u64, &vertex_count as *const u32 as *const c_void);
+        
+        encoder.set_buffer(7, Some(&dangling_contribution_buffer), 0);
+        
+        // 调度线程（所有顶点）
+        let grid_size = MTLSize::new(vertex_count as u64, 1, 1);
+        let threadgroup_size = MTLSize::new(self.pagerank_full_pipeline.thread_execution_width() as u64, 1, 1);
+        encoder.dispatch_threads(grid_size, threadgroup_size);
+        
+        // 执行
+        encoder.end_encoding();
+        command_buffer.commit();
+        command_buffer.wait_until_completed();
+        
+        // 读取结果
+        let result_ptr = new_pr_buffer.contents() as *const f32;
+        let result_slice = unsafe {
+            std::slice::from_raw_parts(result_ptr, vertex_count_usize)
+        };
+        new_pr.copy_from_slice(result_slice);
+        
+        new_pr
     }
 }
