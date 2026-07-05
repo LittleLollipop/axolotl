@@ -1,0 +1,15 @@
+{
+  "affectedVertices" : 990394,
+  "incrementalIterations" : 100,
+  "fullTime" : 9.2175416648387909,
+  "correlation" : 0,
+  "beta" : 1,
+  "algorithm" : "Incremental Katz Centrality",
+  "fullIterations" : 100,
+  "alpha" : 0.10000000149011612,
+  "newEdgeCount" : 1000,
+  "vertexCount" : 10000,
+  "incrementalTime" : 46.109791845083237,
+  "speedup" : 0.19990421331346073,
+  "edgeCount" : 50000
+}

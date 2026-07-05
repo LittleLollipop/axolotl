@@ -1,0 +1,23 @@
+{
+  "algorithm": "Incremental Connected Components",
+  "graph": {
+    "vertices": 100000,
+    "initial_edges": 499971,
+    "new_edges": 5000,
+    "total_edges": 504971
+  },
+  "performance": {
+    "full_recomputation_ms": 51.8858,
+    "incremental_ms": 0.6982,
+    "speedup": 74.31
+  },
+  "correctness": {
+    "matches": true,
+    "mismatches": 0
+  },
+  "components": {
+    "initial": 3,
+    "after_add_full": 3,
+    "after_add_incremental": 3
+  }
+}

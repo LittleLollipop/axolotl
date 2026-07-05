@@ -1,0 +1,12 @@
+{
+  "edgeCount" : 50000,
+  "speedup" : 0.80507856748482165,
+  "totalTriangles" : 173,
+  "vertexCount" : 10000,
+  "algorithm" : "Incremental Local Clustering Coefficient",
+  "incrementalTime" : 18.962124828249216,
+  "newEdgeCount" : 1000,
+  "affectedVertices" : 1830,
+  "fullTime" : 15.266000293195248,
+  "avgCoefficient" : 0.00098774058500838828
+}

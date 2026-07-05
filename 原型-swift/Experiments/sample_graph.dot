@@ -1,0 +1,13 @@
+digraph G {
+  node [shape=circle, style=filled];
+
+  2 [label="Charlie"];
+  3 [label="David"];
+  0 [label="Alice"];
+  1 [label="Bob"];
+
+  0 -> 1;
+  1 -> 2;
+  2 -> 0;
+  2 -> 3;
+}

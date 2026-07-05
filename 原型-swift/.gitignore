@@ -1,0 +1,22 @@
+# Compiled binaries
+*.o
+*.so
+*.dylib
+
+# Swift build artifacts
+.build/
+Packages/
+
+# Metal artifacts
+*.air
+*.metallib
+
+# Logs
+*.log
+
+# OS artifacts
+.DS_Store
+
+# Experiment output
+results/
+data/

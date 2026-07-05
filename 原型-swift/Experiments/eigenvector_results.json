@@ -1,0 +1,13 @@
+{
+  "incrementalTime" : 1709.1863751411438,
+  "edgeCount" : 50000,
+  "fullIterations" : 16,
+  "affectedVertices" : 990420,
+  "vertexCount" : 10000,
+  "incrementalIterations" : 100,
+  "algorithm" : "Incremental Eigenvector Centrality",
+  "fullTime" : 6.145041435956955,
+  "speedup" : 0.0035953021421958739,
+  "correlation" : 1.0000054836273193,
+  "newEdgeCount" : 1000
+}

@@ -1,0 +1,19 @@
+graph G {
+  node [shape=circle, style=filled];
+
+  0 [label="Alice (25)", fillcolor="#4ECDC4"];
+  1 [label="Bob (30)", fillcolor="#FF6B6B"];
+  2 [label="Charlie (28)", fillcolor="#4ECDC4"];
+  3 [label="David (35)", fillcolor="#FF6B6B"];
+  4 [label="Eve (27)", fillcolor="#4ECDC4"];
+  5 [label="Frank (32)", fillcolor="#FF6B6B"];
+
+  0 -- 1;
+  1 -- 2;
+  2 -- 3;
+  3 -- 4;
+  4 -- 5;
+  5 -- 0;
+  0 -- 2;
+  1 -- 3;
+}
