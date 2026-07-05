@@ -53,3 +53,7 @@ harness = false
 [[example]]
 name = "test_metal_api"
 path = "examples/test_metal_api.rs"
+
+[[example]]
+name = "gpu_demo"
+path = "examples/gpu_demo.rs"

@@ -82,13 +82,13 @@ impl GPUAccelerator {
         encoder.set_buffer(0, Some(&affected_buffer), 0);
         
         let affected_count_u32 = affected_count as u32;
-        encoder.set_bytes(1, std::mem::size_of::<u32>(), &affected_count_u32 as *const u32 as *const c_void);
+        encoder.set_bytes(1, std::mem::size_of::<u32>() as u64, &affected_count_u32 as *const u32 as *const c_void);
         
         encoder.set_buffer(2, Some(&offsets_buffer), 0);
         encoder.set_buffer(3, Some(&targets_buffer), 0);
         encoder.set_buffer(4, Some(&pr_buffer), 0);
         encoder.set_buffer(5, Some(&new_pr_buffer), 0);
-        encoder.set_bytes(6, std::mem::size_of::<u32>(), &vertex_count as *const u32 as *const c_void);
+        encoder.set_bytes(6, std::mem::size_of::<u32>() as u64, &vertex_count as *const u32 as *const c_void);
         
         // Swift 第 334-336 行：调度线程
         let grid_size = MTLSize::new(affected_count, 1, 1);

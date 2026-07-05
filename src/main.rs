@@ -111,10 +111,10 @@ fn main() {
     db.export_dot(&dot_path, false).unwrap();
     println!("   ✅ DOT file exported: {:?}", dot_path);
 
-    // 导出 HTML
-    let html_path = PathBuf::from("/tmp/axolotl_rs_social.html");
-    db.export_html(&html_path).unwrap();
-    println!("   ✅ HTML file exported: {:?}", html_path);
+    // 导出 HTML（暂时禁用，方法不存在）
+    // let html_path = PathBuf::from("/tmp/axolotl_rs_social.html");
+    // db.export_html(&html_path).unwrap();
+    // println!("   ✅ HTML file exported: {:?}", html_path);
 
     // 保存 JSON
     println!("\n💾 Saving to JSON...");
