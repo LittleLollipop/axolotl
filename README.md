@@ -15,7 +15,29 @@ Axolotl is a research project exploring graph algorithm optimizations for unifie
 - ⚡ **Incremental Algorithms**: Only update affected vertices (PageRank, BFS, SSSP)
 - 🔬 **Correctness First**: PageRank PR sum = 1.0 (handles dangling nodes correctly)
 
-📖 **[中文文档](README_zh.md)** (to be added)
+📖 **[中文文档](README_zh.md)**
+
+---
+
+## Rust Implementation
+
+The Rust implementation is the current development version, providing:
+
+- ✅ **Correct PageRank**: Handles dangling nodes (PR sum = 1.0)
+- ✅ **GPU Acceleration**: Metal kernels for PageRank, BFS, SSSP
+- ✅ **Incremental Algorithms**: Only update affected vertices
+- ✅ **EdgeBlock Data Structure**: Optimized for GPU memory access
+
+**Quick Start**:
+```bash
+cd prototype-rust
+cargo build --release
+cargo run --release --example test_pagerank_fix
+```
+
+**Documentation**: 
+- [Rust Implementation Guide](prototype-rust/README.md)
+- [Rust API Documentation](core-research/docs/RUST_IMPLEMENTATION.md)
 
 ---
 
