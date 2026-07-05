@@ -36,6 +36,9 @@ rand = "0.8"
 metal = "0.29"
 dispatch = "0.2"
 
+# 内存映射（用于大于内存的图）
+memmap2 = "0.9"
+
 [dev-dependencies]
 # 基准测试
 criterion = "0.5"

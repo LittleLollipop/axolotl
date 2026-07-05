@@ -10,6 +10,8 @@ pub mod query; // Fluent Builder 查询 API
 pub mod transaction; // 事务支持（WAL + 回滚 + 快照隔离）
 pub mod mvcc; // MVCC 快照隔离（Copy-on-Write）
 pub mod index; // 哈希索引（精确匹配）
+pub mod compact_storage; // 紧凑存储（减少内存占用 2-3x）
+pub mod mmap_graph; // mmap 友好格式（支持大于内存的图）
 // pub mod visualization; // 暂时禁用
 pub mod edge_block; // EdgeBlock 数据结构（CPU 版本，优化缓存利用率）
 pub mod csr_graph; // CSR 格式图（用于 GPU 加速）
@@ -18,6 +20,7 @@ pub mod incremental_pagerank; // CPU/GPU 协同的增量 PageRank
 pub mod incremental_bfs; // CPU/GPU 协同的增量 BFS
 pub mod incremental_sssp; // CPU/GPU 协同的增量 SSSP
 pub mod incremental_sssp_edgeblock; // CPU/GPU 协同的增量 SSSP（使用 EdgeBlock 格式）
+pub mod pagerank_correct; // PageRank CPU 正确实现
 pub mod incremental_cc; // 增量 Connected Components（使用 Union-Find）
 pub mod incremental_tc; // 增量 Triangle Counting（三角形计数）
 
