@@ -1,0 +1,479 @@
+# Axolotl 图数据库项目
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
+[![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/Platform-macOS%2014+-lightgrey.svg)]()
+[![Metal](https://img.shields.io/badge/Metal-3.2-green.svg)](https://developer.apple.com/metal/)
+
+**面向 Apple Silicon 统一内存架构的高性能图数据库，支持增量算法和 GPU 加速**
+
+Axolotl 是一个探索统一内存架构下图算法优化的研究项目。主要特性：
+
+- 🧱 **EdgeBlock**: 一种为 GPU 合并内存访问优化的新型图数据结构
+- 🚀 **CPU+GPU 协同**: CPU 调度任务，GPU 执行计算（统一内存）
+- ⚡ **增量算法**: 只更新受影响的顶点（PageRank、BFS、SSSP）
+- 🔬 **正确性优先**: PageRank PR 值之和 = 1.0（正确处理悬挂顶点）
+
+📖 **[English Documentation](README.md)**
+
+---
+
+## 目录
+
+- [为什么叫 "Axolotl"？](#为什么叫-axolotl)
+- [项目结构](#项目结构)
+- [核心创新](#核心创新)
+- [性能结果](#性能结果)
+- [快速开始](#快速开始)
+- [算法细节](#算法细节)
+- [技术文档](#技术文档)
+- [未来工作](#未来工作)
+- [贡献](#贡献)
+- [引用](#引用)
+- [许可证](#许可证)
+
+---
+
+## 为什么叫 "Axolotl"？
+
+Axolotl（墨西哥钝口螈）是一种两栖动物，可以在两种环境中生存 —— 在水中（像鱼）和在陆地上（像蝾螈）。**这正是统一内存架构所实现的：CPU 和 GPU 无缝协作，就像两栖动物在两个环境中一样。**
+
+但这个隐喻还有更多含义：
+
+| Axolotl 的特征 | 统一内存类比 |
+|---------------|-------------|
+| **两栖性**（水 + 陆地） | **CPU + GPU** 协同工作（统一内存） |
+| **再生能力**（再生四肢） | **增量更新**（只更新受影响的部分） |
+| **适应性**（两种环境） | **动态负载均衡**（CPU/GPU 适应任务类型） |
+| **高效性**（最小能量浪费） | **零拷贝内存**（无数据传输开销） |
+
+### 更深层的联系
+
+传统计算就像离开水的鱼 —— CPU 和 GPU 在独立的环境中工作：
+- **鱼（GPU）**：在自己的环境中很棒（并行计算），但在陆地上挣扎（无法高效处理不规则任务）
+- **陆地动物（CPU）**：在陆地上很棒（串行任务、复杂逻辑），但在水中挣扎（并行计算慢）
+
+**统一内存是两栖解决方案**：
+- CPU 和 GPU 共享相同的环境（统一内存）
+- 它们都可以高效工作，各自做自己最擅长的事
+- 它们之间没有"环境障碍"（数据传输成本）
+
+### 为什么不是其他动物？
+
+- **猎豹？** 快，但只有一种模式（纯 GPU）
+- **大象？** 强，但只有一种模式（纯 CPU）
+- **Axolotl？** 完美 —— 在两种环境中都表现出色，适应条件
+
+正如 axolotl 代表了双环境生活的生物创新，这个项目探索计算上的"两栖计算" —— CPU 和 GPU 在统一内存架构中无缝协作。
+
+---
+
+## 项目结构
+
+本仓库包含多个实现和研究材料：
+
+```
+axolotl/
+├── core-research/                  # 研究报告和实验
+│   ├── experiment-reports/         # 实验记录和结果
+│   ├── algorithm-research/         # 算法设计和分析
+│   ├── performance-tests/          # 性能基准测试
+│   └── docs/                      # 技术文档
+├── prototype-swift/               # Swift 原型（参考实现）
+│   ├── Experiments/               # 实验代码（Swift）
+│   ├── Docs/                     # 设计文档
+│   └── Sources/                  # Swift 源代码
+├── prototype-rust/                # Rust 实现（当前开发）
+│   ├── src/                      # Rust 源代码
+│   ├── examples/                 # 示例程序和测试
+│   └── benches/                  # 基准测试
+└── README.md                     # 本文件
+```
+
+### 分支组织
+
+- `dev`: 当前开发分支（默认）
+- `swift`: Swift 原型（从 `main` 分支重命名）
+- `rust`: Rust 实现（从 `master` 分支重命名）
+
+---
+
+## 核心创新
+
+### 1. EdgeBlock 数据结构
+
+**问题**：传统的 CSR（Compressed Sparse Row）格式按顶点存储连续的边数组，但 GPU 访问模式存在非合并内存访问问题。当一个 GPU warp 处理多个顶点时，它们的边数组可能分散在内存中，导致：
+
+- 内存事务利用率低
+- 内存带宽效率降低
+- 缓存局部性差
+
+**解决方案**：**EdgeBlock** 将边分组为固定大小的块（每块 32 条边），实现：
+
+```
+传统 CSR:
+  顶点 0 的边: [5, 10, 15]      ← 地址 A
+  顶点 1 的边: [3, 7, 9, 12]   ← 地址 A+3
+  ...
+  GPU warp 访问: 非合并（不同地址）
+
+EdgeBlock:
+  Block 0: {owner=0, edges=[5, 10, 15, 填充, ...]}  ← 地址 B
+  Block 1: {owner=1, edges=[3, 7, 9, 12, ...]}      ← 地址 B+34
+  ...
+  GPU warp 访问: 合并（连续地址）
+```
+
+**结果**（Swift 原型）：
+- ✅ 幂律图上的 BFS 加速 1.20x - 1.42x
+- ✅ PageRank 加速 1.27x
+- ✅ 优势随图规模增大而增加（在 100K 顶点时达到峰值）
+
+**为什么在幂律图上优势更明显？** 真实世界的网络（社交网络、网页图）遵循幂律度分布。EdgeBlock 的优势在这些图上最为明显，因为：
+- 高度数顶点在 CSR 中有很长的边数组 → 严重的非合并访问
+- EdgeBlock 的固定大小块通过确保顺序访问来缓解这一点
+
+### 2. CPU+GPU 协同算法
+
+**之前的尝试失败了**：我们尝试按顶点 degree 分工：
+- CPU 处理高度数顶点（假设"不规则"）
+- GPU 处理低度数顶点（假设"规则"）
+
+**结果**：比纯 GPU 慢 **3.5 倍**。
+
+**为什么失败？**：
+1. "高度数" ≠ "不规则" —— GPU 的并行处理能力可以高效处理高度数顶点
+2. CPU 缓存优势对于大型邻接表来说微不足道
+3. 每一层 BFS 的 GPU 调用开销很大
+4. 静态分区不能适应动态 frontier 大小
+
+**我们的洞察**：按**工作类型**分工，而不是按数据特征：
+
+```
+✅ 正确的方法:
+   CPU: 调度、记账、收敛性检查（统筹性工作）
+   GPU: 并行计算（执行层面的苦力活）
+
+❌ 错误的方法:
+   CPU: 高度数顶点
+   GPU: 低度数顶点
+```
+
+**第一个成功案例：增量 PageRank**
+
+当图发生变化（添加/删除边）时，我们不会从头重新计算 PageRank。而是：
+
+1. **CPU**：检测受影响的顶点（那些分数变化的顶点）
+2. **GPU**：并行更新受影响顶点的 PageRank 分数
+3. **CPU**：检查收敛性，找出新受影响的顶点（传播）
+4. 重复直到收敛
+
+**结果**：
+- ✅ 比完整重算快 **244 倍**
+- ✅ 高精度（最大误差 < 2.53e-07）
+- ✅ 对于小的图变化，1-2 次迭代即可收敛
+
+**成功的关键**：
+- 统一内存实现零拷贝数据共享
+- CPU 和 GPU 并发工作（不是顺序执行）
+- 动态负载均衡（每轮受影响的顶点数动态变化）
+
+### 3. 正确的 PageRank 实现
+
+**关键修复**：处理悬挂顶点（出度为 0 的顶点）
+
+PageRank 公式：
+```
+PR(v) = (1-d)/N + d × Σ PR(u) / out_degree(u)
+```
+
+**问题**：悬挂顶点（出度为 0）导致 PR 值"丢失"，PR 值之和 ≠ 1.0
+
+**解决方案**：将悬挂顶点的 PR 值贡献均匀分布到所有顶点
+
+**状态**（Rust 实现）：
+- ✅ CPU 版本：PR 值之和 = 1.0
+- ✅ GPU 增量版本：PR 值之和 = 1.0
+- ✅ GPU 全量版本：PR 值之和 = 1.0
+
+### 4. 统一内存的优势
+
+Apple M4 的统一内存架构（CPU/GPU 共享物理地址空间）提供了新的可能性：
+
+| 传统（独立 GPU） | 统一内存（Apple M4） |
+|----------------|-------------------|
+| 数据必须在 CPU ↔ GPU 之间拷贝 | 零拷贝共享内存 |
+| CPU/GPU 异步执行 | 可以并发执行 |
+| 内存空间分离 | 单一地址空间 |
+| 数据传输成本高 | 无传输成本 |
+
+**对图算法的影响**：
+1. **细粒度协作**：CPU 可以检查/修改 GPU 正在处理的数据
+2. **增量更新**：CPU 更新图，GPU 立即看到变化
+3. **无批次大小约束**：可以高效处理单个顶点
+
+---
+
+## 性能结果
+
+### PageRank 正确性（Rust 实现）
+
+| 实现方式 | PR 值之和 | 最大误差 | 状态 |
+|---------|----------|---------|------|
+| CPU（错误版本） | 0.37 | - | ❌ 有 bug |
+| CPU（正确版本） | 1.0000 | < 1e-6 | ✅ 已修复 |
+| GPU 增量版本 | 1.0000 | < 1e-6 | ✅ 已修复 |
+| GPU 全量版本 | 1.0000 | < 1e-6 | ✅ 已修复 |
+
+### 增量 vs 全量重算（Swift 原型）
+
+| 算法 | 全量时间 (ms) | 增量时间 (ms) | 加速比 |
+|------|--------------|--------------|--------|
+| PageRank | 644.24 | 2.66 | **244x** |
+| BFS | 151.47 | 1.89 | **80x** |
+| SSSP | 180.16 | 2.15 | **84x** |
+| 连通分量 | 51.89 | 0.70 | **74x** |
+| 三角形计数 | 12.86 | 0.0265 | **486x** |
+
+**实验环境**：
+- 硬件：Apple M4（10 核 GPU）
+- 图：10 万顶点、50 万边（幂律分布）
+- 变化：添加 10-1000 条边
+
+---
+
+## 快速开始
+
+### Rust 版本（推荐）
+
+```bash
+# 克隆仓库
+git clone https://github.com/LittleLollipop/axolotl.git
+cd axolotl/prototype-rust
+
+# 编译
+cargo build --release
+
+# 运行 PageRank 测试（验证正确性）
+cargo run --release --example test_pagerank_fix
+
+# 预期输出：
+# === PageRank 修复测试 ===
+# 
+# 数据集：1000 顶点，5000 边
+# 阻尼因子：0.85
+# 迭代次数：20
+# 
+# 结果：
+#   CPU PR 值之和 = 1.0000
+#   GPU 增量 PR 值之和 = 1.0000
+#   GPU 全量 PR 值之和 = 1.0000
+# 
+# ✅ 所有实现都产生正确的 PR 值之和 (1.0)
+```
+
+### Swift 版本（参考）
+
+```bash
+cd prototype-swift
+
+# 编译
+swift build
+
+# 运行增量 PageRank 实验
+cd Experiments
+swift incremental_pagerank.swift
+```
+
+---
+
+## 算法细节
+
+### 处理悬挂顶点的 PageRank
+
+**问题**：没有出边的顶点（悬挂顶点）导致 PR 值"丢失"
+
+**解决方案**：将悬挂顶点的贡献加到所有顶点
+
+```rust
+// 伪代码
+let dangling: Vec<usize> = vertices.where(out_degree == 0);
+
+for iteration in 0..max_iter {
+    let dangling_sum: f32 = dangling.iter().map(|&v| pr[v]).sum();
+    let dangling_contribution = dangling_sum / vertex_count as f32;
+    
+    for v in 0..vertex_count {
+        let contribution = compute_contribution(v, pr, out_degrees);
+        new_pr[v] = (1.0 - damping) / vertex_count as f32 
+            + damping * (contribution + dangling_contribution);
+    }
+}
+```
+
+### 增量 PageRank（CPU+GPU 协同）
+
+**算法**：
+1. **CPU**：检测受影响的顶点（那些分数变化的顶点）
+2. **GPU**：并行更新受影响顶点的 PageRank 分数
+3. **CPU**：检查收敛性，找出新受影响的顶点（传播）
+4. 重复直到收敛
+
+**关键洞察**：变化会在图中传播。如果顶点 v 的分数变化，所有指向 v 的顶点可能需要重新计算。
+
+### EdgeBlock GPU 内核（Metal）
+
+```metal
+kernel void pagerank_edgeblock_optimized(
+    device const uint *affected_vertices [[buffer(0)]],
+    constant uint &affected_count [[buffer(1)]],
+    device const uint *reverse_vertices [[buffer(2)]],
+    device const uint *reverse_block_counts [[buffer(3)]],
+    device const EdgeBlock *reverse_blocks [[buffer(4)]],
+    device const float *pr [[buffer(5)]],
+    device float *new_pr [[buffer(6)]],
+    device const uint *out_degrees [[buffer(7)]],
+    constant float &damping_factor [[buffer(8)]],
+    constant uint &vertex_count [[buffer(9)]],
+    constant float &dangling_contribution [[buffer(10)]],
+    uint gid [[thread_position_in_grid]]
+) {
+    if (gid >= affected_count) return;
+    
+    uint v = affected_vertices[gid];
+    float contribution = 0.0;
+    
+    // 遍历反向边（入边）
+    uint block_start = reverse_vertices[v];
+    uint block_end = block_start + reverse_block_counts[v];
+    
+    for (uint block_idx = block_start; block_idx < block_end; block_idx++) {
+        EdgeBlock block = reverse_blocks[block_idx];
+        for (uint i = 0; i < block.edge_count; i++) {
+            uint source = block.edges[i];
+            uint source_out_degree = out_degrees[source];
+            if (source_out_degree > 0) {
+                contribution += pr[source] / float(source_out_degree);
+            }
+        }
+    }
+    
+    float base_score = (1.0 - damping_factor) / float(vertex_count);
+    new_pr[v] = base_score + damping_factor * (contribution + dangling_contribution);
+}
+```
+
+---
+
+## 技术文档
+
+详细的设计决策、基准测试结果和分析，请参阅：
+
+- **项目原则**：[`core-research/algorithm-research/PROJECT_PRINCIPLES.md`](core-research/algorithm-research/PROJECT_PRINCIPLES.md)
+  - 设计原则和哲学决策
+  - 为什么我们选择某些方法
+  
+- **增量 PageRank 状态**：[`core-research/experiment-reports/INCREMENTAL_PR_STATUS.md`](core-research/experiment-reports/INCREMENTAL_PR_STATUS.md)
+  - PageRank bug 修复过程
+  - 正确性验证
+  
+- **性能对比**：[`core-research/performance-tests/PERFORMANCE_COMPARISON.md`](core-research/performance-tests/PERFORMANCE_COMPARISON.md)
+  - 基准测试结果
+  - 与 NetworkX 和 Neo4j 的对比
+
+- **Swift 技术报告**：[`prototype-swift/Docs/technical_report.md`](prototype-swift/Docs/technical_report.md)
+  - EdgeBlock 设计和实现
+  - 性能基准测试（BFS、PageRank）
+  - 失败尝试的分析
+
+---
+
+## 未来工作
+
+### 短期（1-2 个月）
+
+- [ ] **性能对比**：Axolotl vs NetworkX vs Neo4j（端到端）
+- [ ] **增量 BFS**：应用 CPU+GPU 协同到 BFS（Rust）
+- [ ] **增量 SSSP**：单源最短路径的增量更新（Rust）
+- [ ] **完成 PageRank**：增量和全量版本（GPU）
+
+### 中期（3-6 个月）
+
+- [ ] **更多算法**：连通分量、三角形计数、社区检测
+- [ ] **更大的图**：在 1M+ 顶点图上测试
+- [ ] **内存优化**：减少大图的内存占用
+- [ ] **多 GPU 支持**：利用多个 GPU 核心（M4 有 10 个 GPU 核心）
+
+### 长期（6-12 个月）
+
+- [ ] **简单查询接口**：基本的图查询（邻居、路径、排名）
+- [ ] **持久化**：二进制图格式，用于高效存储/加载
+- [ ] **移植到其他架构**：Intel Arc、NVIDIA Grace（统一内存）
+- [ ] **学术论文**：提交到会议（SIGMOD, VLDB, SC）
+
+---
+
+## 贡献
+
+欢迎贡献！这是一个研究项目，探索统一内存架构下图算法的新思想。
+
+### 如何贡献
+
+1. Fork 仓库
+2. 创建功能分支 (`git checkout -b feature/amazing-idea`)
+3. 提交更改 (`git commit -m 'Add amazing idea'`)
+4. 推送到分支 (`git push origin feature/amazing-idea`)
+5. 打开 Pull Request
+
+### 研究合作
+
+如果你对研究合作感兴趣（统一内存图算法、异构计算），请联系我们！
+
+**我们希望帮助的领域**：
+- 更多 CPU+GPU 协同算法
+- 性能优化（Metal 内核调优）
+- 移植到其他统一内存架构
+- 理论分析（为什么 EdgeBlock 有效？）
+
+---
+
+## 引用
+
+如果在研究中使用了 Axolotl，请引用：
+
+```bibtex
+@software{axolotl2026,
+  author = {LittleLollipop},
+  title = {Axolotl: Unified Memory Graph Algorithms for Apple Silicon},
+  year = {2026},
+  url = {https://github.com/LittleLollipop/axolotl}
+}
+```
+
+---
+
+## 致谢
+
+- 灵感来自 [Gunrock](https://github.com/gunrock/gunrock)、[CuGraph](https://github.com/rapidsai/cugraph) 和 [GraphBLAST](https://github.com/gunrock/graphblast)
+- 构建在 Apple 的 [Metal](https://developer.apple.com/metal/) 框架上
+- 在 Apple M4（统一内存架构）上测试
+
+---
+
+## 许可证
+
+本项目采用 MIT 许可证 - 请参阅 [`LICENSE`](LICENSE) 了解详情。
+
+---
+
+## 联系方式
+
+- **GitHub Issues**: [报告错误或请求功能](https://github.com/LittleLollipop/axolotl/issues)
+- **Discussions**: [加入讨论](https://github.com/LittleLollipop/axolotl/discussions)
+
+---
+
+**⚠️ 注意**：这是一个研究项目。代码质量是实验性的，API 可能会更改。使用风险自负。
+
+**🎉 有趣的事实**：Axolotl 也被称为"墨西哥行走鱼"（虽然它们不是鱼，而是两栖动物）。它们在野外永远不会经历变态，永远保持幼虫形态 —— 就像这个项目将永远保持"原型"形式一样（希望不会）！
