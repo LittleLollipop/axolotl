@@ -22,6 +22,10 @@ pub struct CSRGraph {
     /// 
     /// 对应 Swift 版本的 targets 字段
     pub targets: Vec<u32>,
+    /// CSR 格式的权重数组（与 targets 一一对应）
+    /// 
+    /// 对应 Swift 版本的 weights 字段
+    pub weights: Vec<f32>,
     /// 顶点 ID 到索引的映射
     pub vertex_to_idx: HashMap<u64, u32>,
     /// 索引到顶点 ID 的映射
@@ -62,6 +66,7 @@ impl CSRGraph {
             vertices: HashMap::new(),
             offsets: Vec::new(),
             targets: Vec::new(),
+            weights: Vec::new(),  // 权重数组
             reverse_offsets: Vec::new(),  // 初始化反向 CSR
             reverse_targets: Vec::new(),  // 初始化反向 CSR
             vertex_to_idx: HashMap::new(),
