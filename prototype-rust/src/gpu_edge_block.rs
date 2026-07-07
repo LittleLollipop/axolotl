@@ -542,6 +542,139 @@ impl GPUEdgeBlockGraph {
         total
     }
 
+    // ── 增强遍历 ─────────────────────────
+
+    /// 多跳遍历：从 start 出发，最深 depth 层，对每层的邻居调用 visitor
+    /// 返回 visited 集合（所有访问过的顶点）
+    pub fn walk<F>(&self, start: u64, max_depth: usize, mut visitor: F) -> Vec<u64>
+    where
+        F: FnMut(u64, usize, u64), // (当前顶点, 深度, 邻居)
+    {
+        use std::collections::{HashSet, VecDeque};
+        let mut visited = HashSet::new();
+        let mut result = Vec::new();
+        let mut queue = VecDeque::new();
+
+        if self.id_to_idx.get(&start).is_none() {
+            return result;
+        }
+
+        queue.push_back((start, 0usize));
+        visited.insert(start);
+        result.push(start);
+
+        while let Some((current, depth)) = queue.pop_front() {
+            if depth >= max_depth { continue; }
+            for nbr in self.out_neighbors(current) {
+                visitor(current, depth, nbr);
+                if !visited.contains(&nbr) {
+                    visited.insert(nbr);
+                    result.push(nbr);
+                    queue.push_back((nbr, depth + 1));
+                }
+            }
+        }
+        result
+    }
+
+    /// 子图提取：从 seeds 出发，取出 depth 层内的所有顶点和边
+    /// 返回 (顶点列表, 边列表)
+    pub fn subgraph(&self, seeds: &[u64], max_depth: usize)
+        -> (Vec<u64>, Vec<(u64, u64, Option<EdgeData>)>)
+    {
+        use std::collections::{HashSet, VecDeque};
+        let mut vertices = HashSet::new();
+        let mut edges = Vec::new();
+        let mut queue = VecDeque::new();
+
+        for &seed in seeds {
+            if self.id_to_idx.contains_key(&seed) {
+                queue.push_back((seed, 0usize));
+                vertices.insert(seed);
+            }
+        }
+
+        while let Some((current, depth)) = queue.pop_front() {
+            if depth >= max_depth { continue; }
+            for nbr in self.out_neighbors(current) {
+                edges.push((current, nbr, self.edge_data.get(&(current, nbr)).cloned()));
+                if !vertices.contains(&nbr) {
+                    vertices.insert(nbr);
+                    queue.push_back((nbr, depth + 1));
+                }
+            }
+        }
+
+        (vertices.into_iter().collect(), edges)
+    }
+
+    /// 路径模式匹配：找出所有满足条件的路径 A→B→C（长度 = path_length）
+    /// vertex_filter: 筛选中间顶点
+    /// edge_filter: 筛选边属性（可选）
+    /// 返回 Vec<路径顶点序列>
+    pub fn find_paths(
+        &self,
+        vertex_filter: Option<&dyn Fn(u64) -> bool>,
+        edge_filter: Option<&dyn Fn(&EdgeData) -> bool>,
+        path_length: usize,
+    ) -> Vec<Vec<u64>> {
+        let mut paths = Vec::new();
+
+        for v_idx in 0..self.vertex_count as usize {
+            let start_id = self.idx_to_id[v_idx];
+            if start_id == u64::MAX { continue; }
+            if let Some(ref f) = vertex_filter {
+                if !f(start_id) { continue; }
+            }
+
+            let mut current_path = vec![start_id];
+            self.find_paths_dfs(
+                v_idx, start_id, &mut current_path, path_length,
+                vertex_filter, edge_filter, &mut paths,
+            );
+        }
+        paths
+    }
+
+    fn find_paths_dfs(
+        &self,
+        v_idx: usize,
+        v_id: u64,
+        path: &mut Vec<u64>,
+        max_len: usize,
+        vertex_filter: Option<&dyn Fn(u64) -> bool>,
+        edge_filter: Option<&dyn Fn(&EdgeData) -> bool>,
+        results: &mut Vec<Vec<u64>>,
+    ) {
+        if path.len() > max_len {
+            results.push(path.clone());
+            return;
+        }
+
+        for nbr_id in self.out_neighbors_by_idx(v_idx) {
+            if let Some(ref ef) = edge_filter {
+                if let Some(ed) = self.edge_data.get(&(v_id, nbr_id)) {
+                    if !ef(ed) { continue; }
+                }
+            }
+
+            if path.len() < max_len {
+                if let Some(ref vf) = vertex_filter {
+                    if !vf(nbr_id) { continue; }
+                }
+            }
+
+            if let Some(&nbr_idx) = self.id_to_idx.get(&nbr_id) {
+                path.push(nbr_id);
+                self.find_paths_dfs(
+                    nbr_idx, nbr_id, path, max_len,
+                    vertex_filter, edge_filter, results,
+                );
+                path.pop();
+            }
+        }
+    }
+
     /// 获取所有出度（用于 GPU 增量 PageRank）
     pub fn compute_out_degrees(&self) -> Vec<u32> {
         let mut out_degrees = vec![0u32; self.vertex_count as usize];
@@ -1210,5 +1343,46 @@ mod tests {
         assert_eq!(ed2.properties["weight_tag"], PropertyValue::String("half".to_string()));
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_walk() {
+        let mut g = GPUEdgeBlockGraph::new();
+        for i in 0..5u64 { g.add_vertex(i, HashMap::new()); }
+        g.add_edge(0, 1, 1.0); g.add_edge(0, 2, 1.0);
+        g.add_edge(1, 3, 1.0); g.add_edge(2, 4, 1.0); g.add_edge(3, 4, 1.0);
+
+        let mut visited_edges = Vec::new();
+        let visited = g.walk(0, 2, |from, d, to| {
+            visited_edges.push((from, d, to));
+        });
+
+        assert_eq!(visited.len(), 5); // 0,1,2,3,4
+        assert!(!visited_edges.is_empty());
+    }
+
+    #[test]
+    fn test_subgraph() {
+        let mut g = GPUEdgeBlockGraph::new();
+        for i in 0..5u64 { g.add_vertex(i, HashMap::new()); }
+        g.add_edge(0, 1, 1.0); g.add_edge(0, 2, 1.0);
+        g.add_edge(1, 3, 1.0); g.add_edge(3, 4, 1.0);
+
+        let (vertices, edges) = g.subgraph(&[0], 2);
+        assert_eq!(vertices.len(), 4); // 0,1,2,3
+        assert_eq!(edges.len(), 3);    // 0→1, 0→2, 1→3
+    }
+
+    #[test]
+    fn test_find_paths() {
+        let mut g = GPUEdgeBlockGraph::new();
+        for i in 0..5u64 { g.add_vertex(i, HashMap::new()); }
+        g.add_edge(0, 1, 1.0); g.add_edge(1, 2, 1.0);
+        g.add_edge(0, 2, 1.0); g.add_edge(2, 3, 1.0);
+
+        // 找所有 2-hop 路径
+        let paths = g.find_paths(None, None, 2);
+        // 应该有 0→1→2 和 0→2→3 等
+        assert!(!paths.is_empty());
     }
 }

@@ -106,6 +106,10 @@ fn handle_request(req: Request, state: &SharedGraph) -> (u16, String) {
         ("POST", ["algorithms", "pagerank"]) => handle_pagerank(&req.body, state),
         ("POST", ["algorithms", "bfs"]) => handle_bfs(&req.body, state),
 
+        ("POST", ["traverse", "walk"]) => handle_walk(&req.body, state),
+        ("POST", ["traverse", "subgraph"]) => handle_subgraph(&req.body, state),
+        ("POST", ["traverse", "find_paths"]) => handle_find_paths(&req.body, state),
+
         _ => (404, json_err("not found")),
     }
 }
@@ -309,6 +313,79 @@ fn handle_bfs(body: &[u8], state: &SharedGraph) -> (u16, String) {
         "source": source,
         "reached": reached,
         "distances": results
+    }).to_string())
+}
+
+// ── 增强遍历 ─────────────────────────
+
+fn handle_walk(body: &[u8], state: &SharedGraph) -> (u16, String) {
+    let v: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(v) => v, Err(_) => return (400, json_err("invalid JSON")),
+    };
+    let start = v.get("start").and_then(|s| s.as_u64()).unwrap_or(0);
+    let max_depth = v.get("max_depth").and_then(|d| d.as_u64()).unwrap_or(3) as usize;
+
+    let g = state.read().unwrap();
+    let mut edges_seen = Vec::new();
+    let visited = g.walk(start, max_depth, |from, depth, to| {
+        edges_seen.push(serde_json::json!({ "from": from, "depth": depth, "to": to }));
+    });
+
+    (200, serde_json::json!({
+        "start": start, "max_depth": max_depth,
+        "visited": visited,
+        "edges_traversed": edges_seen
+    }).to_string())
+}
+
+fn handle_subgraph(body: &[u8], state: &SharedGraph) -> (u16, String) {
+    let v: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(v) => v, Err(_) => return (400, json_err("invalid JSON")),
+    };
+    let seeds: Vec<u64> = v.get("seeds").and_then(|s| s.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_u64()).collect())
+        .unwrap_or_default();
+    let max_depth = v.get("max_depth").and_then(|d| d.as_u64()).unwrap_or(2) as usize;
+
+    let g = state.read().unwrap();
+    let (vertices, edges) = g.subgraph(&seeds, max_depth);
+
+    let edge_list: Vec<serde_json::Value> = edges.iter().map(|(f, t, ed)| {
+        let mut obj = serde_json::json!({ "from": f, "to": t });
+        if let Some(data) = ed {
+            obj["weight"] = serde_json::json!(data.weight);
+        }
+        obj
+    }).collect();
+
+    (200, serde_json::json!({
+        "seeds": seeds, "max_depth": max_depth,
+        "vertex_count": vertices.len(), "vertices": vertices,
+        "edge_count": edges.len(), "edges": edge_list
+    }).to_string())
+}
+
+fn handle_find_paths(body: &[u8], state: &SharedGraph) -> (u16, String) {
+    let v: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(v) => v, Err(_) => return (400, json_err("invalid JSON")),
+    };
+    let path_length = v.get("path_length").and_then(|l| l.as_u64()).unwrap_or(2) as usize;
+    let max_results = v.get("max_results").and_then(|m| m.as_u64()).unwrap_or(100) as usize;
+
+    let g = state.read().unwrap();
+    let paths = g.find_paths(
+        None::<&dyn Fn(u64) -> bool>,
+        None::<&dyn Fn(&crate::gpu_edge_block::EdgeData) -> bool>,
+        path_length,
+    );
+
+    let limited: Vec<_> = paths.iter().take(max_results).collect();
+
+    (200, serde_json::json!({
+        "path_length": path_length,
+        "total_found": paths.len(),
+        "returned": limited.len(),
+        "paths": limited
     }).to_string())
 }
 

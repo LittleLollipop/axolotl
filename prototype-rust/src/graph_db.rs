@@ -297,6 +297,32 @@ impl GraphDB {
         }
     }
 
+    // ── 增强遍历 ─────────────────────────
+
+    /// 多跳遍历
+    pub fn walk<F>(&self, start: u64, max_depth: usize, visitor: F) -> Vec<u64>
+    where F: FnMut(u64, usize, u64)
+    {
+        self.edgeblock.as_ref().unwrap().walk(start, max_depth, visitor)
+    }
+
+    /// 子图提取
+    pub fn subgraph(
+        &self, seeds: &[u64], max_depth: usize,
+    ) -> (Vec<u64>, Vec<(u64, u64, Option<crate::gpu_edge_block::EdgeData>)>) {
+        self.edgeblock.as_ref().unwrap().subgraph(seeds, max_depth)
+    }
+
+    /// 路径模式匹配
+    pub fn find_paths(
+        &self,
+        vertex_filter: Option<&dyn Fn(u64) -> bool>,
+        edge_filter: Option<&dyn Fn(&crate::gpu_edge_block::EdgeData) -> bool>,
+        path_length: usize,
+    ) -> Vec<Vec<u64>> {
+        self.edgeblock.as_ref().unwrap().find_paths(vertex_filter, edge_filter, path_length)
+    }
+
     /// 转换为 CSR（供 GPU 算法兼容旧接口）
     /// 
     /// InMemory 模式下从 EdgeBlock 构建 CSR（一次性，算法结束后释放）
