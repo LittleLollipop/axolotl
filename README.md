@@ -267,84 +267,6 @@ swift incremental_pagerank.swift
 
 ---
 
-## Algorithm Details
-
-### PageRank with Dangling Nodes
-
-**Problem**: Vertices with no outgoing edges (dangling nodes) cause PR value "loss"
-
-**Solution**: Add dangling contribution to all vertices
-
-```rust
-// Pseudo-code
-let dangling: Vec<usize> = vertices.where(out_degree == 0);
-
-for iteration in 0..max_iter {
-    let dangling_sum: f32 = dangling.iter().map(|&v| pr[v]).sum();
-    let dangling_contribution = dangling_sum / vertex_count as f32;
-    
-    for v in 0..vertex_count {
-        let contribution = compute_contribution(v, pr, out_degrees);
-        new_pr[v] = (1.0 - damping) / vertex_count as f32 
-            + damping * (contribution + dangling_contribution);
-    }
-}
-```
-
-### Incremental PageRank (CPU+GPU Collaborative)
-
-**Algorithm**:
-1. **CPU**: Detect affected vertices (those whose scores changed)
-2. **GPU**: Update PageRank scores for affected vertices in parallel
-3. **CPU**: Check convergence, find newly affected vertices (propagation)
-4. Repeat until convergence
-
-**Key insight**: Changes propagate through the graph. If vertex v's score changes, all vertices pointing to v may need recomputation.
-
-### EdgeBlock GPU Kernel (Metal)
-
-```metal
-kernel void pagerank_edgeblock_optimized(
-    device const uint *affected_vertices [[buffer(0)]],
-    constant uint &affected_count [[buffer(1)]],
-    device const uint *reverse_vertices [[buffer(2)]],
-    device const uint *reverse_block_counts [[buffer(3)]],
-    device const EdgeBlock *reverse_blocks [[buffer(4)]],
-    device const float *pr [[buffer(5)]],
-    device float *new_pr [[buffer(6)]],
-    device const uint *out_degrees [[buffer(7)]],
-    constant float &damping_factor [[buffer(8)]],
-    constant uint &vertex_count [[buffer(9)]],
-    constant float &dangling_contribution [[buffer(10)]],
-    uint gid [[thread_position_in_grid]]
-) {
-    if (gid >= affected_count) return;
-    
-    uint v = affected_vertices[gid];
-    float contribution = 0.0;
-    
-    // Traverse reverse edges (incoming edges)
-    uint block_start = reverse_vertices[v];
-    uint block_end = block_start + reverse_block_counts[v];
-    
-    for (uint block_idx = block_start; block_idx < block_end; block_idx++) {
-        EdgeBlock block = reverse_blocks[block_idx];
-        for (uint i = 0; i < block.edge_count; i++) {
-            uint source = block.edges[i];
-            uint source_out_degree = out_degrees[source];
-            if (source_out_degree > 0) {
-                contribution += pr[source] / float(source_out_degree);
-            }
-        }
-    }
-    
-    float base_score = (1.0 - damping_factor) / float(vertex_count);
-    new_pr[v] = base_score + damping_factor * (contribution + dangling_contribution);
-}
-```
-
----
-
 ## Technical Documentation
 
 - **[Rust Implementation Guide](prototype-rust/README.md)** — Full API reference, architecture, examples
@@ -360,8 +282,6 @@ kernel void pagerank_edgeblock_optimized(
 
 ## Future Work
 
-### Short-term (1-2 months)
-
 - [x] ~~Performance comparison: Axolotl vs NetworkX vs Neo4j~~ → [See benchmark](core-research/experiment-reports/INCREMENTAL_PERF_VERIFICATION.md)
 - [x] ~~Incremental BFS: CPU+GPU collaboration (Rust)~~
 - [x] ~~Incremental SSSP: Single Source Shortest Path (Rust)~~
@@ -372,19 +292,11 @@ kernel void pagerank_edgeblock_optimized(
 - [x] ~~REST API server~~
 - [x] ~~Python bindings: PyO3 integration~~ → `pip install` ready
 - [ ] **Incremental PageRank performance optimization**: GPU kernel path improvements
-
-### Medium-term (3-6 months)
-
 - [ ] **Larger graphs**: Test on 10M+ vertex graphs
-- [ ] **Memory optimization**: Reduce memory footprint for large graphs
-- [ ] **Multi-GPU support**: Utilize multiple GPU cores (M4 has 10 GPU cores)
-- [ ] **Query DSL**: Extended traversal/pattern matching support
-
-### Long-term (6-12 months)
-
+- [ ] **Multi-GPU support**: Utilize multiple GPU cores
 - [ ] **Distributed support**: Sharding/replication for multi-machine graphs
 - [ ] **Port to other architectures**: Intel Arc, NVIDIA Grace (unified memory)
-- [ ] **Academic paper**: Submit to conferences (SIGMOD, VLDB, SC)
+- [ ] **Academic paper**: Submit to conferences
 
 ---
 
