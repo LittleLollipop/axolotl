@@ -25,6 +25,7 @@ pub mod pagerank_correct; // PageRank CPU 正确实现
 pub mod incremental_cc; // 增量 Connected Components（使用 Union-Find）
 pub mod incremental_tc; // 增量 Triangle Counting（三角形计数）
 pub mod server; // REST API 网络层
+pub mod recovery; // Crash Recovery（WAL 重放）
 
 // GPU 模块（仅在 macOS 上编译）
 #[cfg(target_os = "macos")]

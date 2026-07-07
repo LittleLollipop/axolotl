@@ -72,29 +72,66 @@ impl GraphDB {
         }
     }
 
-    /// 打开图数据库
+    /// 打开图数据库（自动 WAL 恢复）
     ///
-    /// - InMemory：目前仅支持从文件加载（需要先保存过）
-    ///   如果文件不存在，返回错误
-    /// - Mmap：打开 mmap 文件
+    /// - 加载基础图文件
+    /// - 自动扫描 WAL 目录并重放已提交事务
+    /// - 清理未提交事务的 WAL 文件
     pub fn open<P: AsRef<Path>>(path: P, mode: GraphMode) -> Result<Self, GraphDBError> {
+        Self::open_internal(path, mode, true)
+    }
+
+    /// 打开图数据库（可跳过 WAL 恢复）
+    pub fn open_without_recovery<P: AsRef<Path>>(path: P, mode: GraphMode) -> Result<Self, GraphDBError> {
+        Self::open_internal(path, mode, false)
+    }
+
+    fn open_internal<P: AsRef<Path>>(
+        path: P,
+        mode: GraphMode,
+        with_recovery: bool,
+    ) -> Result<Self, GraphDBError> {
+        let path_str = path.as_ref().to_str().unwrap().to_string();
+        let wal_dir = format!("{}.wal", path_str);
+
         match mode {
             GraphMode::InMemory => {
-                let path_str = path.as_ref().to_str().unwrap();
-                if !std::path::Path::new(path_str).exists() {
-                    return Err(GraphDBError::Io(format!("file {} not found", path_str)));
+                let mut eb = if std::path::Path::new(&path_str).exists() {
+                    // 优先使用原生 EdgeBlock 格式加载
+                    if let Ok(g) = crate::gpu_edge_block::GPUEdgeBlockGraph::open(&path_str) {
+                        g
+                    } else {
+                        // 回退到旧 PersistentGraph 格式
+                        let pg = crate::PersistentGraph::open(&path_str)?;
+                        Self::persistent_to_edgeblock(&pg)
+                    }
+                } else {
+                    // 文件不存在：创建空 EdgeBlock
+                    crate::gpu_edge_block::GPUEdgeBlockGraph::new()
+                };
+
+                // WAL 恢复
+                if with_recovery {
+                    let wal_exists = std::path::Path::new(&wal_dir).exists();
+                    if wal_exists {
+                        // 转 PersistentGraph 用于 WAL 重放
+                        let mut pg = Self::eb_to_persistent(&eb);
+                        match crate::recovery::recover_wal(&mut pg, &wal_dir) {
+                            Ok(result) => {
+                                if result.transactions_replayed > 0 {
+                                    eprintln!("[recovery] Replayed {} transactions ({} vertices, {} edges), skipped {}",
+                                        result.transactions_replayed, result.vertices_added,
+                                        result.edges_added, result.transactions_skipped);
+                                    eb = Self::persistent_to_edgeblock(&pg);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[recovery] Warning: WAL recovery failed: {}", e);
+                            }
+                        }
+                    }
                 }
-                // 优先使用原生 EdgeBlock 格式加载
-                if let Ok(eb) = crate::gpu_edge_block::GPUEdgeBlockGraph::open(path_str) {
-                    return Ok(GraphDB {
-                        mode,
-                        edgeblock: Some(eb),
-                        mmap: None,
-                    });
-                }
-                // 回退到旧 PersistentGraph 格式
-                let pg = crate::PersistentGraph::open(path_str)?;
-                let eb = Self::persistent_to_edgeblock(&pg);
+
                 Ok(GraphDB {
                     mode,
                     edgeblock: Some(eb),
@@ -144,6 +181,29 @@ impl GraphDB {
             g.add_edge(*from, *to, er.weight as f32);
         }
         g
+    }
+
+    /// EdgeBlock → PersistentGraph（内部转换）
+    fn eb_to_persistent(eb: &GPUEdgeBlockGraph) -> crate::PersistentGraph {
+        let mut pg = crate::persistence::PersistentGraph {
+            vertices: HashMap::new(), edges: HashMap::new(),
+            file_path: String::new(),
+            index_manager: crate::index::IndexManager::new(),
+        };
+        for i in 0..eb.vertex_count as usize {
+            let id = eb.idx_to_id[i];
+            if id != u64::MAX {
+                pg.add_vertex(id, eb.vertex_props[i].clone());
+            }
+        }
+        for i in 0..eb.vertex_count as usize {
+            let from_id = eb.idx_to_id[i];
+            if from_id == u64::MAX { continue; }
+            for to_id in eb.out_neighbors_by_idx(i) {
+                pg.add_edge(from_id, to_id, 1.0, HashMap::new());
+            }
+        }
+        pg
     }
 
     /// 导出为 PersistentGraph（用于兼容旧持久化）
