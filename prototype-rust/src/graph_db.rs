@@ -1,33 +1,28 @@
 // src/graph_db.rs
 // 统一图数据库接口（内存模式 / mmap 模式切换）
 //
+// InMemory 模式使用 GPUEdgeBlockGraph 作为主存储：
+//   - 数据以 EdgeBlock 格式（扁平化 u32 数组）存储在 CPU 内存中
+//   - GPU 算法直接用 EdgeBlock 格式创建 Metal buffer（一次拷贝）
+//   - 不再有 HashMap→CSR 的中间转换
+//
 // 使用方式：
-//
-// // 内存模式（完整加载，支持读写）
-// let db = GraphDB::open("graph.bin", GraphMode::InMemory)?;
-//
-// // mmap 模式（只读，支持大于内存的图）
-// let db = GraphDB::open("graph.bin", GraphMode::Mmap)?;
-// // 或指定 mmap 文件路径
-// let db = GraphDB::open_with_mmap("graph.bin", "graph.mmap")?;
-//
-// // 统一 API（两种模式都支持）
-// db.get_vertex(id)
-// db.out_neighbors(id)
-// db.to_csr()  // 转 CSR 供 GPU 算法
+//   let db = GraphDB::new(GraphMode::InMemory);      // 新建空图
+//   let db = GraphDB::open("graph.bin", GraphMode::InMemory)?;  // 加载
+//   let db = GraphDB::open("graph.bin", GraphMode::Mmap)?;      // mmap
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::{PropertyValue, PersistentGraph, CSRGraph};
+use crate::{PropertyValue, CSRGraph};
+use crate::gpu_edge_block::GPUEdgeBlockGraph;
 use crate::mmap_graph::MmapGraph;
 
 // ── 模式选择 ─────────────────────────
 
-/// 图数据库打开模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphMode {
-    /// 完整加载到内存（支持读写，需要足够内存）
+    /// 完整加载到内存（支持读写，使用 EdgeBlock 格式）
     InMemory,
     /// mmap 只读模式（支持大于内存的图，只读）
     Mmap,
@@ -50,52 +45,64 @@ impl From<std::io::Error> for GraphDBError {
 
 // ── 统一图数据库句柄 ─────────────────────────
 
-/// 统一图数据库句柄
-///
-/// 支持两种模式：
-/// - InMemory：完整加载到内存，支持读写
-/// - Mmap：mmap 只读，支持大于内存的图
-///
-/// 两种模式对外暴露同一套只读 API；
-/// 写操作仅在 InMemory 模式下可用。
 pub struct GraphDB {
     mode: GraphMode,
 
-    // ---- InMemory 模式 ----
-    persistent: Option<PersistentGraph>,
+    // ---- InMemory 模式：EdgeBlock 原生存储 ----
+    edgeblock: Option<GPUEdgeBlockGraph>,
 
     // ---- Mmap 模式 ----
     mmap: Option<MmapGraph>,
 }
 
 impl GraphDB {
-    // ── 打开数据库 ─────────────────────────
+    // ── 打开 / 创建数据库 ─────────────────────────
 
-    /// 打开图数据库（自动选择模式）
+    /// 创建空的内存模式数据库
+    pub fn new(mode: GraphMode) -> Self {
+        match mode {
+            GraphMode::InMemory => GraphDB {
+                mode,
+                edgeblock: Some(GPUEdgeBlockGraph::new()),
+                mmap: None,
+            },
+            GraphMode::Mmap => {
+                panic!("Use GraphDB::open() for Mmap mode with a file path");
+            }
+        }
+    }
+
+    /// 打开图数据库
     ///
-    /// - InMemory：从二进制文件完整加载到内存
-    /// - Mmap：打开 mmap 文件（如果不存在则自动从二进制文件生成）
+    /// - InMemory：目前仅支持从文件加载（需要先保存过）
+    ///   如果文件不存在，返回错误
+    /// - Mmap：打开 mmap 文件
     pub fn open<P: AsRef<Path>>(path: P, mode: GraphMode) -> Result<Self, GraphDBError> {
         match mode {
             GraphMode::InMemory => {
-                let g = PersistentGraph::open(path.as_ref().to_str().unwrap())?;
+                let path_str = path.as_ref().to_str().unwrap();
+                if !std::path::Path::new(path_str).exists() {
+                    return Err(GraphDBError::Io(format!("file {} not found", path_str)));
+                }
+                // 从 PersistentGraph 加载（兼容旧格式），然后转为 EdgeBlock
+                // TODO: 直接实现 EdgeBlock 的二进制持久化
+                let pg = crate::PersistentGraph::open(path_str)?;
+                let eb = Self::persistent_to_edgeblock(&pg);
                 Ok(GraphDB {
                     mode,
-                    persistent: Some(g),
+                    edgeblock: Some(eb),
                     mmap: None,
                 })
             }
             GraphMode::Mmap => {
-                // 尝试直接打开 .mmap 文件；如果不存在，自动从二进制文件生成
                 let path_str = path.as_ref().to_str().unwrap();
                 let mmap_path = format!("{}.mmap", path_str);
 
                 if !std::path::Path::new(&mmap_path).exists() {
-                    // 需要先从 PersistentGraph 生成 mmap 文件
                     if !std::path::Path::new(path_str).exists() {
                         return Err(GraphDBError::Io(format!("neither {} nor {} exists", path_str, mmap_path)));
                     }
-                    let src = PersistentGraph::open(path_str)?;
+                    let src = crate::PersistentGraph::open(path_str)?;
                     MmapGraph::convert_from(&src, &mmap_path)
                         .map_err(|e| GraphDBError::Io(e.to_string()))?;
                 }
@@ -104,78 +111,91 @@ impl GraphDB {
                     .map_err(|e| GraphDBError::Io(e.to_string()))?;
                 Ok(GraphDB {
                     mode,
-                    persistent: None,
+                    edgeblock: None,
                     mmap: Some(mmap_g),
                 })
             }
         }
     }
 
-    /// 打开数据库（显式指定 mmap 文件路径）
-    pub fn open_with_mmap<P: AsRef<Path>>(
-        bin_path:  P,
-        mmap_path: P,
-        mode:      GraphMode,
-    ) -> Result<Self, GraphDBError> {
-        match mode {
-            GraphMode::InMemory => Self::open(bin_path, mode),
-            GraphMode::Mmap => {
-                let mmap_path_str = mmap_path.as_ref().to_str().unwrap();
-                if !std::path::Path::new(mmap_path_str).exists() {
-                    let src = PersistentGraph::open(bin_path.as_ref().to_str().unwrap())?;
-                    MmapGraph::convert_from(&src, mmap_path_str)
-                        .map_err(|e| GraphDBError::Io(e.to_string()))?;
-                }
-                let mmap_g = MmapGraph::open(mmap_path_str)
-                    .map_err(|e| GraphDBError::Io(e.to_string()))?;
-                Ok(GraphDB {
-                    mode,
-                    persistent: None,
-                    mmap: Some(mmap_g),
-                })
-            }
-        }
-    }
-
-    /// 创建内存模式数据库（新建，不加载文件）
-    pub fn create_in_memory(file_path: &str) -> Result<Self, GraphDBError> {
-        let g = PersistentGraph {
-            vertices:      HashMap::new(),
-            edges:         HashMap::new(),
-            file_path:     file_path.to_string(),
-            index_manager:  crate::index::IndexManager::new(),
-        };
+    /// 创建内存模式数据库（可指定文件路径用于保存）
+    pub fn create_in_memory(_file_path: &str) -> Result<Self, GraphDBError> {
         Ok(GraphDB {
             mode: GraphMode::InMemory,
-            persistent: Some(g),
+            edgeblock: Some(GPUEdgeBlockGraph::new()),
             mmap: None,
         })
     }
 
-    // ── 只读 API（两种模式都支持）─────────────────────────
+    /// 从 PersistentGraph 转换为 EdgeBlock
+    fn persistent_to_edgeblock(pg: &crate::PersistentGraph) -> GPUEdgeBlockGraph {
+        let mut g = GPUEdgeBlockGraph::new();
+        for (&id, vr) in &pg.vertices {
+            g.add_vertex(id, vr.properties.clone());
+        }
+        for ((from, to), er) in &pg.edges {
+            g.add_edge(*from, *to, er.weight as f32);
+        }
+        g
+    }
 
-    /// 顶点数量
+    /// 导出为 PersistentGraph（用于兼容旧持久化）
+    fn to_persistent(&self) -> crate::PersistentGraph {
+        let eb = self.edgeblock.as_ref().unwrap();
+        let mut pg = crate::persistence::PersistentGraph {
+            vertices: HashMap::new(),
+            edges: HashMap::new(),
+            file_path: String::new(),
+            index_manager: crate::index::IndexManager::new(),
+        };
+        for i in 0..eb.idx_to_id.len() {
+            let id = eb.idx_to_id[i];
+            let props = eb.vertex_props[i].clone();
+            pg.add_vertex(id, props);
+        }
+        // 重建所有边
+        for i in 0..eb.vertex_count as usize {
+            let from_id = eb.idx_to_id[i];
+            let neighbors = eb.out_neighbors_by_idx(i);
+            for &to_id in &neighbors {
+                pg.add_edge(from_id, to_id, 1.0, HashMap::new());
+            }
+        }
+        pg
+    }
+
+    // ── 获取底层 EdgeBlock（供 GPU 算法直接访问）─────────────────
+
+    /// 获取 InMemory 模式下的 GPUEdgeBlockGraph 引用
+    pub fn edgeblock(&self) -> Option<&GPUEdgeBlockGraph> {
+        self.edgeblock.as_ref()
+    }
+
+    /// 获取 InMemory 模式下的 GPUEdgeBlockGraph 可变引用
+    pub fn edgeblock_mut(&mut self) -> Option<&mut GPUEdgeBlockGraph> {
+        self.edgeblock.as_mut()
+    }
+
+    // ── 只读 API ─────────────────────────
+
     pub fn vertex_count(&self) -> usize {
         match self.mode {
-            GraphMode::InMemory => self.persistent.as_ref().unwrap().vertices.len(),
+            GraphMode::InMemory => self.edgeblock.as_ref().unwrap().vertex_count as usize,
             GraphMode::Mmap    => self.mmap.as_ref().unwrap().vertex_count(),
         }
     }
 
-    /// 边数量
     pub fn edge_count(&self) -> usize {
         match self.mode {
-            GraphMode::InMemory => self.persistent.as_ref().unwrap().edges.len(),
+            GraphMode::InMemory => self.edgeblock.as_ref().unwrap().total_edges as usize,
             GraphMode::Mmap    => self.mmap.as_ref().unwrap().edge_count(),
         }
     }
 
-    /// 获取顶点属性
     pub fn get_vertex(&self, id: u64) -> Option<HashMap<String, PropertyValue>> {
         match self.mode {
             GraphMode::InMemory => {
-                self.persistent.as_ref().unwrap().vertices.get(&id)
-                    .map(|vr| vr.properties.clone())
+                self.edgeblock.as_ref().unwrap().get_vertex(id).cloned()
             }
             GraphMode::Mmap => {
                 self.mmap.as_ref().unwrap().get_vertex(id)
@@ -183,29 +203,31 @@ impl GraphDB {
         }
     }
 
-    /// 获取边（权重 + 属性）
-    pub fn get_edge(&self, from: u64, to: u64) -> Option<(f64, HashMap<String, PropertyValue>)> {
+    pub fn get_edge(&self, _from: u64, _to: u64) -> Option<(f64, HashMap<String, PropertyValue>)> {
         match self.mode {
             GraphMode::InMemory => {
-                self.persistent.as_ref().unwrap().edges.get(&(from, to))
-                    .map(|er| (er.weight, er.properties.clone()))
+                // EdgeBlock 不直接支持边属性查询，返回简单结果
+                let eb = self.edgeblock.as_ref().unwrap();
+                if let Some(&from_idx) = eb.id_to_idx.get(&_from) {
+                    if let Some(&to_idx) = eb.id_to_idx.get(&_to) {
+                        let neighbors = eb.out_neighbors_by_idx(from_idx);
+                        if neighbors.contains(&_to) {
+                            return Some((1.0, HashMap::new()));
+                        }
+                    }
+                }
+                None
             }
             GraphMode::Mmap => {
-                self.mmap.as_ref().unwrap().get_edge(from, to)
+                self.mmap.as_ref().unwrap().get_edge(_from, _to)
             }
         }
     }
 
-    /// 获取出边邻居列表
     pub fn out_neighbors(&self, id: u64) -> Vec<u64> {
         match self.mode {
             GraphMode::InMemory => {
-                // 扫描 edges HashMap
-                let g = self.persistent.as_ref().unwrap();
-                g.edges.keys()
-                    .filter(|(f, _)| *f == id)
-                    .map(|(_, t)| *t)
-                    .collect()
+                self.edgeblock.as_ref().unwrap().out_neighbors(id)
             }
             GraphMode::Mmap => {
                 self.mmap.as_ref().unwrap().out_neighbors(id)
@@ -213,11 +235,36 @@ impl GraphDB {
         }
     }
 
-    /// 转换为 CSR（供 GPU 算法使用）
+    /// 转换为 CSR（供 GPU 算法兼容旧接口）
+    /// 
+    /// InMemory 模式下从 EdgeBlock 构建 CSR（一次性，算法结束后释放）
     pub fn to_csr(&self) -> CSRGraph {
         match self.mode {
             GraphMode::InMemory => {
-                self.persistent.as_ref().unwrap().to_csr()
+                let eb = self.edgeblock.as_ref().unwrap();
+                let mut csr = CSRGraph::new();
+
+                // 按 idx 顺序添加顶点
+                for i in 0..eb.idx_to_id.len() {
+                    let id = eb.idx_to_id[i];
+                    let props = eb.vertex_props[i].clone();
+                    csr.add_vertex(id, props);
+                }
+
+                // 收集所有边
+                let mut edges: Vec<(u64, u64)> = Vec::new();
+                for i in 0..eb.vertex_count as usize {
+                    let from_id = eb.idx_to_id[i];
+                    for to_id in eb.out_neighbors_by_idx(i) {
+                        edges.push((from_id, to_id));
+                    }
+                }
+                csr.build_csr(&edges);
+
+                // 填充权重
+                csr.weights = vec![1.0f32; edges.len()];
+
+                csr
             }
             GraphMode::Mmap => {
                 self.mmap.as_ref().unwrap().to_csr()
@@ -225,12 +272,15 @@ impl GraphDB {
         }
     }
 
-    /// 迭代所有顶点
     pub fn iter_vertices(&self) -> Box<dyn Iterator<Item = (u64, HashMap<String, PropertyValue>)> + '_> {
         match self.mode {
             GraphMode::InMemory => {
-                let g = self.persistent.as_ref().unwrap();
-                Box::new(g.vertices.iter().map(|(id, vr)| (*id, vr.properties.clone())))
+                let eb = self.edgeblock.as_ref().unwrap();
+                Box::new(
+                    eb.idx_to_id.iter().enumerate().map(|(i, &id)| {
+                        (id, eb.vertex_props[i].clone())
+                    })
+                )
             }
             GraphMode::Mmap => {
                 Box::new(self.mmap.as_ref().unwrap().iter_vertices())
@@ -238,12 +288,18 @@ impl GraphDB {
         }
     }
 
-    /// 迭代所有边
     pub fn iter_edges(&self) -> Box<dyn Iterator<Item = (u64, u64, f64, HashMap<String, PropertyValue>)> + '_> {
         match self.mode {
             GraphMode::InMemory => {
-                let g = self.persistent.as_ref().unwrap();
-                Box::new(g.edges.iter().map(|((from, to), er)| (*from, *to, er.weight, er.properties.clone())))
+                let eb = self.edgeblock.as_ref().unwrap();
+                let mut result: Vec<(u64, u64, f64, HashMap<String, PropertyValue>)> = Vec::new();
+                for i in 0..eb.vertex_count as usize {
+                    let from_id = eb.idx_to_id[i];
+                    for to_id in eb.out_neighbors_by_idx(i) {
+                        result.push((from_id, to_id, 1.0, HashMap::new()));
+                    }
+                }
+                Box::new(result.into_iter())
             }
             GraphMode::Mmap => {
                 Box::new(
@@ -254,52 +310,46 @@ impl GraphDB {
         }
     }
 
-    /// 获取当前模式
     pub fn mode(&self) -> GraphMode {
         self.mode
     }
 
     // ── 写操作 API（仅 InMemory 模式）─────────────────────────
 
-    /// 添加顶点（仅 InMemory 模式）
     pub fn add_vertex(&mut self, id: u64, properties: HashMap<String, PropertyValue>) -> Result<(), GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                self.persistent.as_mut().unwrap().add_vertex(id, properties);
+                self.edgeblock.as_mut().unwrap().add_vertex(id, properties);
                 Ok(())
             }
             GraphMode::Mmap => {
-                Err(GraphDBError::NotSupported("add_vertex not supported in Mmap mode. Switch to InMemory mode for write operations.".to_string()))
+                Err(GraphDBError::NotSupported("add_vertex not supported in Mmap mode.".to_string()))
             }
         }
     }
 
-    /// 添加边（仅 InMemory 模式）
     pub fn add_edge(
         &mut self,
-        from:      u64,
-        to:        u64,
-        weight:    f64,
-        properties: HashMap<String, PropertyValue>,
+        from: u64,
+        to: u64,
+        weight: f64,
+        _properties: HashMap<String, PropertyValue>,
     ) -> Result<(), GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                self.persistent.as_mut().unwrap().add_edge(from, to, weight, properties);
+                self.edgeblock.as_mut().unwrap().add_edge(from, to, weight as f32);
                 Ok(())
             }
             GraphMode::Mmap => {
-                Err(GraphDBError::NotSupported("add_edge not supported in Mmap mode. Switch to InMemory mode for write operations.".to_string()))
+                Err(GraphDBError::NotSupported("add_edge not supported in Mmap mode.".to_string()))
             }
         }
     }
 
-    /// 删除顶点（仅 InMemory 模式）
-    /// 返回被删除顶点的属性（如果存在）
-    pub fn delete_vertex(&mut self, id: u64) -> Result<Option<HashMap<String, PropertyValue>>, GraphDBError> {
+    pub fn delete_vertex(&mut self, _id: u64) -> Result<Option<HashMap<String, PropertyValue>>, GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                let result = self.persistent.as_mut().unwrap().delete_vertex(id);
-                Ok(result)
+                Err(GraphDBError::NotSupported("delete_vertex not yet supported in EdgeBlock. Use PersistentGraph for deletions.".to_string()))
             }
             GraphMode::Mmap => {
                 Err(GraphDBError::NotSupported("delete_vertex not supported in Mmap mode.".to_string()))
@@ -307,12 +357,10 @@ impl GraphDB {
         }
     }
 
-    /// 删除边（仅 InMemory 模式）
-    pub fn delete_edge(&mut self, from: u64, to: u64) -> Result<Option<(f64, HashMap<String, PropertyValue>)>, GraphDBError> {
+    pub fn delete_edge(&mut self, _from: u64, _to: u64) -> Result<Option<(f64, HashMap<String, PropertyValue>)>, GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                let result = self.persistent.as_mut().unwrap().delete_edge(from, to);
-                Ok(result)
+                Err(GraphDBError::NotSupported("delete_edge not yet supported in EdgeBlock.".to_string()))
             }
             GraphMode::Mmap => {
                 Err(GraphDBError::NotSupported("delete_edge not supported in Mmap mode.".to_string()))
@@ -320,27 +368,40 @@ impl GraphDB {
         }
     }
 
-    /// 保存（仅 InMemory 模式）
     pub fn save(&self) -> Result<(), GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                self.persistent.as_ref().unwrap().save()
-                    .map_err(|e| GraphDBError::Io(e.to_string()))?;
-                Ok(())
+                // 持久化需要一个文件路径。通过 GraphDB 的 save_to 方法指定。
+                Err(GraphDBError::NotSupported("use GraphDB::save_to(file_path) to specify save path. EdgeBlock persistence coming soon.".to_string()))
             }
             GraphMode::Mmap => {
-                Err(GraphDBError::NotSupported("save not supported in Mmap mode. Data is read-only.".to_string()))
+                Err(GraphDBError::NotSupported("save not supported in Mmap mode.".to_string()))
             }
         }
     }
 
-    /// 生成 mmap 文件（从当前 InMemory 数据）
-    /// 生成后可以用 Mmap 模式打开
+    /// 保存到指定文件（仅 InMemory 模式）
+    pub fn save_to(&self, file_path: &str) -> Result<(), GraphDBError> {
+        match self.mode {
+            GraphMode::InMemory => {
+                let pg = self.to_persistent();
+                let mut pg = pg;
+                pg.file_path = file_path.to_string();
+                pg.save().map_err(|e| GraphDBError::Io(e.to_string()))?;
+                Ok(())
+            }
+            GraphMode::Mmap => {
+                Err(GraphDBError::NotSupported("save_to not supported in Mmap mode.".to_string()))
+            }
+        }
+    }
+
+    /// 生成 mmap 文件
     pub fn generate_mmap_file(&self, mmap_path: &str) -> Result<(), GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                let g = self.persistent.as_ref().unwrap();
-                MmapGraph::convert_from(g, mmap_path)
+                let pg = self.to_persistent();
+                MmapGraph::convert_from(&pg, mmap_path)
                     .map_err(|e| GraphDBError::Io(e.to_string()))?;
                 Ok(())
             }
@@ -350,15 +411,15 @@ impl GraphDB {
         }
     }
 
-    // ── 索引 API（仅 InMemory 模式）─────────────────────────
+    // ── 索引 API ─────────────────────────
 
-    /// 创建索引（仅 InMemory 模式）
-    pub fn create_index(&mut self, name: &str, property_key: &str, unique: bool) -> Result<(), GraphDBError> {
+    pub fn create_index(&mut self, _name: &str, _property_key: &str, _unique: bool) -> Result<(), GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                self.persistent.as_mut().unwrap().create_index(name, property_key, unique)
-                    .map_err(|e| GraphDBError::Io(e.to_string()))?;
-                Ok(())
+                // EdgeBlock 暂不原生支持索引，通过 PersistentGraph 实现
+                let pg = self.to_persistent();
+                // TODO: 索引状态应该持久化在 GraphDB 中
+                Err(GraphDBError::NotSupported("create_index not yet supported with EdgeBlock.".to_string()))
             }
             GraphMode::Mmap => {
                 Err(GraphDBError::NotSupported("create_index not supported in Mmap mode.".to_string()))
@@ -366,17 +427,8 @@ impl GraphDB {
         }
     }
 
-    /// 删除索引（仅 InMemory 模式）
-    pub fn drop_index(&mut self, name: &str) -> Result<(), GraphDBError> {
-        match self.mode {
-            GraphMode::InMemory => {
-                self.persistent.as_mut().unwrap().drop_index(name);
-                Ok(())
-            }
-            GraphMode::Mmap => {
-                Err(GraphDBError::NotSupported("drop_index not supported in Mmap mode.".to_string()))
-            }
-        }
+    pub fn drop_index(&mut self, _name: &str) -> Result<(), GraphDBError> {
+        Err(GraphDBError::NotSupported("drop_index not yet supported with EdgeBlock.".to_string()))
     }
 }
 
@@ -387,14 +439,19 @@ mod tests {
     use super::*;
     use crate::PropertyValue;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn make_test_graph() -> GraphDB {
-        // 使用 open（如果文件存在则加载，不存在则创建空数据库）
-        let file_path = "/tmp/test_graph_db.bin";
-        // 先删除旧文件
-        let _ = std::fs::remove_file(file_path);
+    static TEST_ID: AtomicUsize = AtomicUsize::new(0);
 
-        let mut db = GraphDB::create_in_memory(file_path).unwrap();
+    fn make_test_graph() -> (GraphDB, String) {
+        let id = TEST_ID.fetch_add(1, Ordering::SeqCst);
+        let file_path = format!("/tmp/test_graph_db_{}.bin", id);
+        let mmap_path = format!("{}.mmap", file_path);
+
+        let _ = std::fs::remove_file(&file_path);
+        let _ = std::fs::remove_file(&mmap_path);
+
+        let mut db = GraphDB::create_in_memory(&file_path).unwrap();
 
         let mut alice = HashMap::new();
         alice.insert("name".to_string(), PropertyValue::String("Alice".to_string()));
@@ -407,15 +464,15 @@ mod tests {
 
         db.add_edge(1, 2, 1.0, HashMap::new()).unwrap();
 
-        // 保存（创建二进制文件）
-        db.save().unwrap();
+        // 持久化（测试需要）
+        db.save_to(&file_path).unwrap();
 
-        db
+        (db, file_path)
     }
 
     #[test]
     fn test_in_memory_mode() {
-        let db = make_test_graph();
+        let (db, _file_path) = make_test_graph();
 
         assert_eq!(db.mode(), GraphMode::InMemory);
         assert_eq!(db.vertex_count(), 2);
@@ -430,13 +487,13 @@ mod tests {
 
     #[test]
     fn test_mmap_mode() {
-        // 先创建并保存
-        let db = make_test_graph();
-        // 生成 mmap 文件
-        db.generate_mmap_file("/tmp/test_graph_db.bin.mmap").unwrap();
+        let (_db, file_path) = make_test_graph();
+        let mmap_path = format!("{}.mmap", file_path);
 
-        // 用 Mmap 模式打开
-        let db = GraphDB::open("/tmp/test_graph_db.bin", GraphMode::Mmap).unwrap();
+        let db = GraphDB::open(&file_path, GraphMode::InMemory).unwrap();
+        db.generate_mmap_file(&mmap_path).unwrap();
+
+        let db = GraphDB::open(&file_path, GraphMode::Mmap).unwrap();
 
         assert_eq!(db.mode(), GraphMode::Mmap);
         assert_eq!(db.vertex_count(), 2);
@@ -448,19 +505,19 @@ mod tests {
         let neighbors = db.out_neighbors(1);
         assert_eq!(neighbors, vec![2]);
 
-        // 清理
-        let _ = std::fs::remove_file("/tmp/test_graph_db.bin.mmap");
+        let _ = std::fs::remove_file(&mmap_path);
     }
 
     #[test]
     fn test_mmap_mode_read_only() {
-        // 先准备 mmap 文件
-        let db = make_test_graph();
-        db.generate_mmap_file("/tmp/test_graph_db.bin.mmap").unwrap();
+        let (_db, file_path) = make_test_graph();
+        let mmap_path = format!("{}.mmap", file_path);
 
-        let mut db = GraphDB::open("/tmp/test_graph_db.bin", GraphMode::Mmap).unwrap();
+        let db = GraphDB::open(&file_path, GraphMode::InMemory).unwrap();
+        db.generate_mmap_file(&mmap_path).unwrap();
 
-        // 写操作应该返回错误
+        let mut db = GraphDB::open(&file_path, GraphMode::Mmap).unwrap();
+
         let result = db.add_vertex(3, HashMap::new());
         assert!(result.is_err());
 
@@ -468,44 +525,93 @@ mod tests {
         assert!(result.is_err());
 
         let result = db.save();
-        assert!(result.is_err());
+        assert!(result.is_err()); // mmap 模式不能保存
 
-        let _ = std::fs::remove_file("/tmp/test_graph_db.bin.mmap");
+        let _ = std::fs::remove_file(&mmap_path);
     }
 
     #[test]
     fn test_to_csr_both_modes() {
-        // InMemory 模式
-        let db = make_test_graph();
+        let (db, _file_path) = make_test_graph();
         let csr = db.to_csr();
         assert_eq!(csr.vertex_count, 2);
         assert_eq!(csr.total_edges,  1);
 
-        // Mmap 模式
-        let db = make_test_graph();
-        db.generate_mmap_file("/tmp/test_graph_db.bin.mmap").unwrap();
-        let db = GraphDB::open("/tmp/test_graph_db.bin", GraphMode::Mmap).unwrap();
+        let (_db, file_path) = make_test_graph();
+        let mmap_path = format!("{}.mmap", file_path);
+
+        let db = GraphDB::open(&file_path, GraphMode::InMemory).unwrap();
+        db.generate_mmap_file(&mmap_path).unwrap();
+
+        let db = GraphDB::open(&file_path, GraphMode::Mmap).unwrap();
         let csr = db.to_csr();
         assert_eq!(csr.vertex_count, 2);
         assert_eq!(csr.total_edges,  1);
 
-        let _ = std::fs::remove_file("/tmp/test_graph_db.bin.mmap");
+        let _ = std::fs::remove_file(&mmap_path);
     }
 
     #[test]
     fn test_iter_both_modes() {
-        // InMemory 模式
-        let db = make_test_graph();
+        let (db, _file_path) = make_test_graph();
         let vertices: Vec<_> = db.iter_vertices().collect();
         assert_eq!(vertices.len(), 2);
 
-        // Mmap 模式
-        let db = make_test_graph();
-        db.generate_mmap_file("/tmp/test_graph_db.bin.mmap").unwrap();
-        let db = GraphDB::open("/tmp/test_graph_db.bin", GraphMode::Mmap).unwrap();
+        let (_db, file_path) = make_test_graph();
+        let mmap_path = format!("{}.mmap", file_path);
+
+        let db = GraphDB::open(&file_path, GraphMode::InMemory).unwrap();
+        db.generate_mmap_file(&mmap_path).unwrap();
+
+        let db = GraphDB::open(&file_path, GraphMode::Mmap).unwrap();
         let vertices: Vec<_> = db.iter_vertices().collect();
         assert_eq!(vertices.len(), 2);
 
-        let _ = std::fs::remove_file("/tmp/test_graph_db.bin.mmap");
+        let _ = std::fs::remove_file(&mmap_path);
+    }
+
+    #[test]
+    fn test_edgeblock_many_edges() {
+        let mut db = GraphDB::new(GraphMode::InMemory);
+        let center_id = 1u64;
+
+        let mut props = HashMap::new();
+        props.insert("name".to_string(), PropertyValue::String("center".to_string()));
+        db.add_vertex(center_id, props).unwrap();
+
+        for i in 0..100u64 {
+            let id = 1000 + i;
+            db.add_vertex(id, HashMap::new()).unwrap();
+            db.add_edge(center_id, id, 1.0, HashMap::new()).unwrap();
+        }
+
+        assert_eq!(db.vertex_count(), 101);
+        assert_eq!(db.edge_count(), 100);
+
+        let neighbors = db.out_neighbors(center_id);
+        assert_eq!(neighbors.len(), 100);
+
+        // 验证所有邻居都能找到
+        for i in 0..100u64 {
+            assert!(neighbors.contains(&(1000 + i)));
+        }
+    }
+
+    #[test]
+    fn test_edgeblock_direct_access() {
+        let mut db = GraphDB::new(GraphMode::InMemory);
+        db.add_vertex(10, HashMap::new()).unwrap();
+        db.add_vertex(20, HashMap::new()).unwrap();
+        db.add_edge(10, 20, 1.0, HashMap::new()).unwrap();
+
+        // 直接访问 EdgeBlock
+        let eb = db.edgeblock().unwrap();
+        assert_eq!(eb.total_edges, 1);
+        assert_eq!(eb.out_neighbors(10), vec![20]);
+
+        // 可变访问
+        let eb_mut = db.edgeblock_mut().unwrap();
+        eb_mut.add_edge(20, 10, 1.0);
+        assert_eq!(eb_mut.total_edges, 2);
     }
 }

@@ -19,7 +19,7 @@ fn main() {
     // 添加顶点
     for i in 0..5 {
         let mut props = HashMap::new();
-        props.insert("id".to_string(), axolotl_rs::csr_graph::PropertyValue::Int(i as i64));
+        props.insert("id".to_string(), axolotl_rs::PropertyValue::Int(i as i64));
         csr.add_vertex(i, props);
     }
     
@@ -46,9 +46,11 @@ fn main() {
     let new_pr = gpu.compute_incremental_pagerank(
         &csr.offsets,
         &csr.targets,
+        &csr.reverse_offsets,
+        &csr.reverse_targets,
         &initial_pr,
         &affected_vertices,
-        csr.vertex_count,
+        csr.vertex_count as u32,
     );
     
     println!("GPU 计算结果：");

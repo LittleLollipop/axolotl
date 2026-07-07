@@ -22,6 +22,14 @@ pub fn compute_pagerank_cpu(csr: &CSRGraph, iterations: usize) -> Vec<f32> {
     for _ in 0..iterations {
         let mut new_pr = vec![0.0; vertex_count];
         
+        // 计算 dangling nodes 的总 PR 值
+        let mut dangling_pr_sum = 0.0f32;
+        for v in 0..vertex_count {
+            if out_degrees[v] == 0 {
+                dangling_pr_sum += pr[v];
+            }
+        }
+        
         // 计算每个顶点的贡献
         for v in 0..vertex_count {
             let start = csr.offsets[v] as usize;
@@ -38,9 +46,13 @@ pub fn compute_pagerank_cpu(csr: &CSRGraph, iterations: usize) -> Vec<f32> {
         }
         
         // 应用阻尼因子
+        // 标准 PageRank 公式：
+        // PR(v) = (1-d)/N + d * sum(PR(u)/out_degree(u) for u -> v) + d * dangling_pr_sum / N
+        // 最后一项是 dangling nodes 的贡献（dangling nodes 的 PR 值均匀分布到所有节点）
         let base_score = (1.0 - damping) / vertex_count as f32;
+        let dangling_contribution = damping * dangling_pr_sum / vertex_count as f32;
         for v in 0..vertex_count {
-            new_pr[v] = base_score + damping * new_pr[v];
+            new_pr[v] = base_score + dangling_contribution + damping * new_pr[v];
         }
         
         pr = new_pr;

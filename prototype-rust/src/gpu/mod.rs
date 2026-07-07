@@ -20,6 +20,31 @@ pub struct GPUAccelerator {
     pagerank_full_pipeline: ComputePipelineState,  // PageRank 全量管线
 }
 
+/// 缓存的 EdgeBlock GPU 缓冲区（复用，避免每次调用都分配）
+pub struct EdgeBlockCache {
+    pub reverse_vertices_buffer: Option<Buffer>,
+    pub reverse_block_counts_buffer: Option<Buffer>,
+    pub reverse_blocks_buffer: Option<Buffer>,
+    pub out_degrees_buffer: Option<Buffer>,
+    pub reverse_blocks_len: usize,
+    pub reverse_vertices_len: usize,
+    pub out_degrees_len: usize,
+}
+
+impl EdgeBlockCache {
+    pub fn new() -> Self {
+        EdgeBlockCache {
+            reverse_vertices_buffer: None,
+            reverse_block_counts_buffer: None,
+            reverse_blocks_buffer: None,
+            out_degrees_buffer: None,
+            reverse_blocks_len: 0,
+            reverse_vertices_len: 0,
+            out_degrees_len: 0,
+        }
+    }
+}
+
 impl GPUAccelerator {
     /// 创建新的 GPU 加速器（Swift 第 131-137 行）
     pub fn new() -> Result<Self, String> {
@@ -575,8 +600,73 @@ impl GPUAccelerator {
     /// - affected_vertices: 受影响顶点列表
     /// - out_degrees: 每个顶点的出度
     /// - damping_factor: 阻尼因子
+    /// - cached_buffers: 可选的缓存缓冲区（避免重复分配大图数据）
     /// 
     /// 返回：更新后的 PR 值
+
+    /// 同步 EdgeBlock 数据到 GPU 缓冲区（仅复制变更部分）
+    fn sync_edgeblock_buffers(
+        &self,
+        graph: &crate::gpu_edge_block::GPUEdgeBlockGraph,
+        out_degrees: &[u32],
+        cache: &mut EdgeBlockCache,
+    ) {
+        let rev_verts_len = graph.reverse_vertices.len();
+        let rev_blocks_len = graph.reverse_blocks.len();
+        let degs_len = out_degrees.len();
+
+        // reverse_vertices
+        if rev_verts_len > cache.reverse_vertices_len
+            || cache.reverse_vertices_buffer.is_none()
+        {
+            cache.reverse_vertices_buffer = Some(self.create_buffer(&graph.reverse_vertices));
+            cache.reverse_vertices_len = rev_verts_len;
+        } else if graph.reverse_blocks_dirty || graph.structure_dirty {
+            if let Some(ref buf) = cache.reverse_vertices_buffer {
+                let ptr = buf.contents() as *mut u32;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        graph.reverse_vertices.as_ptr(), ptr, rev_verts_len);
+                }
+            }
+        }
+
+        // reverse_block_counts（通常很小，每次更新）
+        cache.reverse_block_counts_buffer = Some(self.create_buffer(&graph.reverse_block_counts));
+
+        // reverse_blocks（最大的缓冲区）
+        if rev_blocks_len > cache.reverse_blocks_len
+            || cache.reverse_blocks_buffer.is_none()
+        {
+            cache.reverse_blocks_buffer = Some(self.create_buffer(&graph.reverse_blocks));
+            cache.reverse_blocks_len = rev_blocks_len;
+        } else if graph.reverse_blocks_dirty || graph.structure_dirty {
+            if let Some(ref buf) = cache.reverse_blocks_buffer {
+                let ptr = buf.contents() as *mut u32;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        graph.reverse_blocks.as_ptr(), ptr, rev_blocks_len);
+                }
+            }
+        }
+
+        // out_degrees
+        if degs_len > cache.out_degrees_len
+            || cache.out_degrees_buffer.is_none()
+        {
+            cache.out_degrees_buffer = Some(self.create_buffer(out_degrees));
+            cache.out_degrees_len = degs_len;
+        } else if graph.blocks_dirty || graph.structure_dirty {
+            if let Some(ref buf) = cache.out_degrees_buffer {
+                let ptr = buf.contents() as *mut u32;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        out_degrees.as_ptr(), ptr, degs_len);
+                }
+            }
+        }
+    }
+
     pub fn compute_incremental_pagerank_edgeblock(
         &self,
         gpu_edge_block: &crate::gpu_edge_block::GPUEdgeBlockGraph,
@@ -585,12 +675,33 @@ impl GPUAccelerator {
         out_degrees: &[u32],
         damping_factor: f32,
     ) -> Vec<f32> {
+        self.compute_incremental_pagerank_edgeblock_cached(
+            gpu_edge_block,
+            pr,
+            affected_vertices,
+            out_degrees,
+            damping_factor,
+            None, // 不使用缓存（向后兼容）
+        )
+    }
+    
+    /// 带缓存的增量 PageRank（EdgeBlock 格式）
+    ///
+    /// 传入 `cache` 以复用 GPU 缓冲区（避免每次调用都重新分配大图数据）。
+    /// 传入 `None` 则每次创建新缓冲区（与旧行为相同）。
+    pub fn compute_incremental_pagerank_edgeblock_cached(
+        &self,
+        gpu_edge_block: &crate::gpu_edge_block::GPUEdgeBlockGraph,
+        pr: &[f32],
+        affected_vertices: &[u32],
+        out_degrees: &[u32],
+        damping_factor: f32,
+        cache: Option<&mut EdgeBlockCache>,
+    ) -> Vec<f32> {
         let affected_count = affected_vertices.len() as u64;
         let vertex_count = gpu_edge_block.vertex_count as usize;
         
-        // 计算悬挂顶点的贡献（CPU 端计算）
-        // 悬挂顶点：出度为 0 的顶点
-        // 其 PR 值应该均匀分布到所有顶点
+        // 计算悬挂顶点的贡献
         let dangling_sum: f32 = pr.iter()
             .enumerate()
             .filter(|(v, _)| out_degrees[*v] == 0)
@@ -598,72 +709,57 @@ impl GPUAccelerator {
             .sum();
         let dangling_contribution = dangling_sum / vertex_count as f32;
         
-        // 创建缓冲区
-        let affected_buffer = self.create_buffer(affected_vertices);
-        let reverse_vertices_buffer = self.create_buffer(&gpu_edge_block.reverse_vertices);
-        let reverse_block_counts_buffer = self.create_buffer(&gpu_edge_block.reverse_block_counts);
-        let reverse_blocks_buffer = self.create_buffer(&gpu_edge_block.reverse_blocks);
-        let pr_buffer = self.create_buffer(pr);
-        let out_degrees_buffer = self.create_buffer(out_degrees);
+        let mut local_cache;
+        let cache = match cache {
+            Some(c) => c,
+            None => {
+                local_cache = EdgeBlockCache::new();
+                &mut local_cache
+            }
+        };
         
-        // 创建 dangling_contribution 缓冲区（长度为 1）
+        // 同步大型静态缓冲区（使用缓存）
+        self.sync_edgeblock_buffers(gpu_edge_block, out_degrees, cache);
+        
+        // 动态缓冲区（每次迭代变化）
+        let affected_buffer = self.create_buffer(affected_vertices);
+        let pr_buffer = self.create_buffer(pr);
+        
         let dangling_contribution_vec = vec![dangling_contribution];
         let dangling_contribution_buffer = self.create_buffer(&dangling_contribution_vec);
         
-        // 复制当前的 PR 值
         let mut new_pr = pr.to_vec();
         let new_pr_buffer = self.create_buffer(&new_pr);
         
-        // 创建命令缓冲区和编码器
+        // 命令缓冲区
         let command_buffer = self.queue.new_command_buffer();
         let encoder = command_buffer.new_compute_command_encoder();
-        
-        // 设置计算管线状态
         encoder.set_compute_pipeline_state(&self.pagerank_edgeblock_pipeline);
         
-        // 设置参数（对应 pagerank_edgeblock_optimized 内核）
-        // buffer(0): affected_vertices
-        // buffer(1): affected_count (constant)
-        // buffer(2): reverse_vertices
-        // buffer(3): reverse_block_counts
-        // buffer(4): reverse_blocks
-        // buffer(5): pr
-        // buffer(6): new_pr
-        // buffer(7): out_degrees
-        // buffer(8): damping_factor (constant)
-        // buffer(9): vertex_count (constant)
-        // buffer(10): dangling_contribution
-        
         encoder.set_buffer(0, Some(&affected_buffer), 0);
-        
         let affected_count_u32 = affected_count as u32;
         encoder.set_bytes(1, std::mem::size_of::<u32>() as u64, &affected_count_u32 as *const u32 as *const c_void);
         
-        encoder.set_buffer(2, Some(&reverse_vertices_buffer), 0);
-        encoder.set_buffer(3, Some(&reverse_block_counts_buffer), 0);
-        encoder.set_buffer(4, Some(&reverse_blocks_buffer), 0);
+        encoder.set_buffer(2, cache.reverse_vertices_buffer.as_deref(), 0);
+        encoder.set_buffer(3, cache.reverse_block_counts_buffer.as_deref(), 0);
+        encoder.set_buffer(4, cache.reverse_blocks_buffer.as_deref(), 0);
         encoder.set_buffer(5, Some(&pr_buffer), 0);
         encoder.set_buffer(6, Some(&new_pr_buffer), 0);
-        encoder.set_buffer(7, Some(&out_degrees_buffer), 0);
+        encoder.set_buffer(7, cache.out_degrees_buffer.as_deref(), 0);
         
         encoder.set_bytes(8, std::mem::size_of::<f32>() as u64, &damping_factor as *const f32 as *const c_void);
-        
         let vertex_count_u32 = vertex_count as u32;
         encoder.set_bytes(9, std::mem::size_of::<u32>() as u64, &vertex_count_u32 as *const u32 as *const c_void);
-        
         encoder.set_buffer(10, Some(&dangling_contribution_buffer), 0);
         
-        // 调度线程
         let grid_size = MTLSize::new(affected_count, 1, 1);
         let threadgroup_size = MTLSize::new(self.pagerank_edgeblock_pipeline.thread_execution_width() as u64, 1, 1);
         encoder.dispatch_threads(grid_size, threadgroup_size);
         
-        // 执行
         encoder.end_encoding();
         command_buffer.commit();
         command_buffer.wait_until_completed();
         
-        // 读取结果
         let result_ptr = new_pr_buffer.contents() as *const f32;
         let result_slice = unsafe {
             std::slice::from_raw_parts(result_ptr, vertex_count)

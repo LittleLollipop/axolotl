@@ -1,20 +1,28 @@
 // src/main.rs
-// Axolotl-RS: 命令行界面
+// Axolotl-RS: 命令行界面和演示
 
 use axolotl_rs::*;
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 fn main() {
     println!("🦄 Axolotl-RS: High-Performance Graph Database");
     println!("{}", "=".repeat(60));
 
     // 创建图数据库
-    let mut db = GraphDB::new();
+    let mut db = persistence::PersistentGraph::open("/tmp/axolotl_rs_demo.bin")
+        .expect("Failed to open database");
 
-    // 添加顶点（社交网络）
+    // 清空旧数据
+    let vertex_ids: Vec<u64> = db.vertices.keys().copied().collect();
+    for id in vertex_ids {
+        db.delete_vertex(id);
+    }
+
     println!("\n📊 Creating social network graph...");
-    
+
+    // 添加顶点
+    let mut name_to_id: HashMap<&str, u64> = HashMap::new();
+
     let vertices = vec![
         ("Alice", "Data Scientist", 28),
         ("Bob", "Software Engineer", 32),
@@ -23,16 +31,14 @@ fn main() {
         ("Eve", "Software Engineer", 29),
     ];
 
-    let mut name_to_id: HashMap<&str, VertexId> = HashMap::new();
-
     for (name, job, age) in vertices {
         let mut props = HashMap::new();
         props.insert("name".to_string(), PropertyValue::String(name.to_string()));
         props.insert("job".to_string(), PropertyValue::String(job.to_string()));
         props.insert("age".to_string(), PropertyValue::Int(age));
 
-        let vertex_id = db.add_vertex(props).unwrap();
-        name_to_id.insert(name, vertex_id);
+        db.add_vertex(name_to_id.len() as u64 + 1, props);
+        name_to_id.insert(name, name_to_id.len() as u64 + 1);
     }
 
     // 添加边（朋友关系）
@@ -47,13 +53,15 @@ fn main() {
     for (from_name, to_name, weight) in edges {
         let from_id = name_to_id[from_name];
         let to_id = name_to_id[to_name];
-        db.add_edge(from_id, to_id, HashMap::new(), weight)
-            .unwrap();
+        db.add_edge(from_id, to_id, weight, HashMap::new());
     }
 
     println!("✅ Graph created!");
-    println!("   Vertices: {}", db.vertex_count());
-    println!("   Edges: {}", db.edge_count());
+    println!("   Vertices: {}", db.vertices.len());
+    println!("   Edges: {}", db.edges.len());
+
+    // 保存
+    db.save().expect("Failed to save");
 
     // 运行图算法
     println!("\n🧮 Running graph algorithms...");
@@ -63,69 +71,63 @@ fn main() {
     let eve_id = name_to_id["Eve"];
     let path = db.shortest_path(alice_id, eve_id);
     println!("\n   📏 Shortest path (Alice -> Eve):");
-    for vertex_id in &path {
-        if let Some(vertex) = db.get_vertex(*vertex_id) {
-            if let Some(PropertyValue::String(name)) = vertex.properties.get("name") {
-                print!("{} -> ", name);
+    for (i, &vertex_id) in path.iter().enumerate() {
+        if let Some(props) = db.find_vertex().with_id(vertex_id).execute_with_properties().first() {
+            if let PropertyValue::String(name) = &props.1["name"] {
+                if i < path.len() - 1 {
+                    print!("{} -> ", name);
+                } else {
+                    println!("{}", name);
+                }
             }
         }
     }
-    println!("Done");
 
-    // PageRank
+    // PageRank (CPU version)
     println!("\n   📈 PageRank (top 3):");
-    let pr = db.pagerank(0.85, 100, 1e-6);
-    let mut pr_vec: Vec<_> = pr.iter().collect();
+    let csr = db.to_csr();
+    let pr = pagerank_correct::compute_pagerank_cpu(&csr, 100);
+    let mut pr_vec: Vec<_> = pr.iter().enumerate().collect();
     pr_vec.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
-    for (vertex_id, score) in pr_vec.iter().take(3) {
-        if let Some(vertex) = db.get_vertex(**vertex_id) {
-            if let Some(PropertyValue::String(name)) = vertex.properties.get("name") {
+    for (i, (vertex_idx, score)) in pr_vec.iter().take(3).enumerate() {
+        let vertex_id = csr.idx_to_vertex[*vertex_idx];
+        if let Some(props) = db.find_vertex().with_id(vertex_id).execute_with_properties().first() {
+            if let PropertyValue::String(name) = &props.1["name"] {
                 println!("      {}: {:.4}", name, score);
             }
         }
     }
-
-    // Betweenness Centrality
-    println!("\n   🌉 Betweenness Centrality (top 3):");
-    let betweenness = db.betweenness_centrality();
-    let mut bt_vec: Vec<_> = betweenness.iter().collect();
-    bt_vec.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
-    for (vertex_id, score) in bt_vec.iter().take(3) {
-        if let Some(vertex) = db.get_vertex(**vertex_id) {
-            if let Some(PropertyValue::String(name)) = vertex.properties.get("name") {
-                println!("      {}: {:.4}", name, score);
-            }
-        }
-    }
-
-    // 连通分量
-    println!("\n   🔗 Connected Components:");
-    let components = db.connected_components();
-    println!("      Number of components: {}", components.len());
-
-    // 导出可视化
-    println!("\n🎨 Exporting visualization...");
-
-    // 导出 DOT
-    let dot_path = PathBuf::from("/tmp/axolotl_rs_social.dot");
-    db.export_dot(&dot_path, false).unwrap();
-    println!("   ✅ DOT file exported: {:?}", dot_path);
-
-    // 导出 HTML（暂时禁用，方法不存在）
-    // let html_path = PathBuf::from("/tmp/axolotl_rs_social.html");
-    // db.export_html(&html_path).unwrap();
-    // println!("   ✅ HTML file exported: {:?}", html_path);
-
-    // 保存 JSON
-    println!("\n💾 Saving to JSON...");
-    let json_path = PathBuf::from("/tmp/axolotl_rs_social.json");
-    db.save_json(&json_path).unwrap();
-    println!("   ✅ JSON saved: {:?}", json_path);
 
     println!("\n{}", "=".repeat(60));
     println!("✨ Demo completed!");
+
+    // 测试 mmap 格式转换
+    println!("\n🗜️ Testing mmap format...");
+    let mmap_path = "/tmp/axolotl_rs_demo.mmap";
+    mmap_graph::MmapGraph::convert_from(&db, mmap_path)
+        .expect("Failed to convert to mmap format");
+
+    let mut mmap_g = mmap_graph::MmapGraph::open(mmap_path)
+        .expect("Failed to open mmap graph");
+
+    println!("   ✅ Converted to mmap format");
+    println!("   Vertex count: {}", mmap_g.vertex_count());
+    println!("   Edge count: {}", mmap_g.edge_count());
+
+    // 验证 mmap 格式的数据
+    if let Some(props) = mmap_g.get_vertex(1) {
+        println!("   Alice props: {:?}", props);
+    }
+
+    let neighbors = mmap_g.out_neighbors(1);
+    println!("   Alice's out-neighbors: {:?}", neighbors);
+
+    // 清理
+    let _ = std::fs::remove_file(mmap_path);
+
     println!("\n💡 Tips:");
-    println!("   - Open HTML file in browser for interactive visualization");
-    println!("   - Use Graphviz to render DOT: dot -Tpng input.dot -o output.png");
-    println!("   - Run benchmarks: cargo bench");
+    println!("   - Use GPU acceleration: `gpu::compute_full_pagerank()`");
+    println!("   - Query API: `db.find_vertex().with_property(...)`");
+    println!("   - Create index: `db.create_index(...)`");
+    println!("   - Mmap format supports graphs larger than memory");
 }
