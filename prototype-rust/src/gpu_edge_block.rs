@@ -19,6 +19,22 @@
 use std::collections::HashMap;
 use crate::PropertyValue;
 
+/// 边属性数据（独立于拓扑结构存储）
+#[derive(Debug, Clone)]
+pub struct EdgeData {
+    pub weight: f32,
+    pub properties: HashMap<String, PropertyValue>,
+}
+
+impl EdgeData {
+    pub fn new(weight: f32) -> Self {
+        EdgeData { weight, properties: HashMap::new() }
+    }
+    pub fn with_props(weight: f32, properties: HashMap<String, PropertyValue>) -> Self {
+        EdgeData { weight, properties }
+    }
+}
+
 /// GPU EdgeBlock 统一内存图存储
 ///
 /// 同时作为 CPU 的主存储和 GPU 的数据源。
@@ -51,8 +67,10 @@ pub struct GPUEdgeBlockGraph {
     /// 顶点属性（内部索引 → 属性）
     pub vertex_props: Vec<HashMap<String, PropertyValue>>,
 
-    // ── 边计数 ──
+    // ── 边计数 + 属性 ──
     pub total_edges: u64,
+    /// 边属性存储（外部 ID → 边数据），独立于拓扑结构
+    pub edge_data: HashMap<(u64, u64), EdgeData>,
 
     // ── Dirty 标记（GPU 同步用）──
     pub blocks_dirty: bool,
@@ -83,6 +101,7 @@ impl GPUEdgeBlockGraph {
             vertex_props: Vec::new(),
 
             total_edges: 0,
+            edge_data: HashMap::new(),
 
             blocks_dirty: true,
             reverse_blocks_dirty: true,
@@ -166,6 +185,14 @@ impl GPUEdgeBlockGraph {
     /// 3. 否则创建新 block（O(1) 摊销）
     /// 4. 对 to 顶点的反向 block 做同样操作
     pub fn add_edge(&mut self, from: u64, to: u64, weight: f32) {
+        self.add_edge_with_props(from, to, weight, HashMap::new())
+    }
+
+    /// 添加边（带属性）
+    pub fn add_edge_with_props(
+        &mut self, from: u64, to: u64, weight: f32,
+        properties: HashMap<String, PropertyValue>,
+    ) {
         let from_idx = self.get_or_create_idx(from);
         let to_idx = self.get_or_create_idx(to);
         let to_idx_u32 = to_idx as u32;
@@ -184,7 +211,15 @@ impl GPUEdgeBlockGraph {
             &mut true, // reverse
         );
 
+        // ── 存储边属性 ──
+        self.edge_data.insert((from, to), EdgeData { weight, properties });
+
         self.total_edges += 1;
+    }
+
+    /// 获取边属性
+    pub fn get_edge(&self, from: u64, to: u64) -> Option<&EdgeData> {
+        self.edge_data.get(&(from, to))
     }
 
     /// 向顶点 v_idx 的最后一个 block 追加一条边
@@ -267,6 +302,7 @@ impl GPUEdgeBlockGraph {
 
         if found_fwd || found_rev {
             self.total_edges = self.total_edges.saturating_sub(1);
+            self.edge_data.remove(&(from, to));
             self.blocks_dirty = true;
             self.reverse_blocks_dirty = true;
             true
@@ -337,7 +373,19 @@ impl GPUEdgeBlockGraph {
         // 6. 清空反向 blocks
         self.clear_blocks(idx, true);
 
-        // 7. 标记删除
+        // 7. 清理边属性
+        for target_idx in &outgoing {
+            if *target_idx < self.idx_to_id.len() && self.idx_to_id[*target_idx] != u64::MAX {
+                self.edge_data.remove(&(id, self.idx_to_id[*target_idx]));
+            }
+        }
+        for src_idx in &incoming_sources {
+            if *src_idx < self.idx_to_id.len() && self.idx_to_id[*src_idx] != u64::MAX {
+                self.edge_data.remove(&(self.idx_to_id[*src_idx], id));
+            }
+        }
+
+        // 8. 标记删除
         let props = std::mem::replace(&mut self.vertex_props[idx], HashMap::new());
         self.id_to_idx.remove(&id);
         self.idx_to_id[idx] = u64::MAX; // tombstone
@@ -609,6 +657,7 @@ impl GPUEdgeBlockGraph {
             id_to_idx,
             vertex_props: vec![HashMap::new(); vc],
             total_edges,
+            edge_data: HashMap::new(),
             blocks_dirty: true,
             reverse_blocks_dirty: true,
             structure_dirty: true,
@@ -693,6 +742,23 @@ impl GPUEdgeBlockGraph {
             let n = props.len() as u16;
             buf.extend_from_slice(&n.to_be_bytes());
             for (key, value) in props {
+                let kb = key.as_bytes();
+                buf.extend_from_slice(&(kb.len() as u16).to_be_bytes());
+                buf.extend_from_slice(kb);
+                Self::write_property_value(&mut buf, value);
+            }
+        }
+
+        // Edge data: count + per-edge entries
+        let edge_count = self.edge_data.len() as u32;
+        buf.extend_from_slice(&edge_count.to_be_bytes());
+        for ((from, to), ed) in &self.edge_data {
+            buf.extend_from_slice(&from.to_be_bytes());
+            buf.extend_from_slice(&to.to_be_bytes());
+            buf.extend_from_slice(&ed.weight.to_be_bytes());
+            let n = ed.properties.len() as u16;
+            buf.extend_from_slice(&n.to_be_bytes());
+            for (key, value) in &ed.properties {
                 let kb = key.as_bytes();
                 buf.extend_from_slice(&(kb.len() as u16).to_be_bytes());
                 buf.extend_from_slice(kb);
@@ -797,6 +863,36 @@ impl GPUEdgeBlockGraph {
             vertex_props.push(props);
         }
 
+        // Read edge data
+        let mut edge_data = HashMap::new();
+        let mut lb_edge = [0u8; 4];
+        f.read_exact(&mut lb_edge)?;
+        let edge_count = u32::from_be_bytes(lb_edge) as usize;
+        for _ in 0..edge_count {
+            let mut b = [0u8; 8];
+            f.read_exact(&mut b)?; let from = u64::from_be_bytes(b);
+            f.read_exact(&mut b)?; let to = u64::from_be_bytes(b);
+            let mut wb = [0u8; 4];
+            f.read_exact(&mut wb)?;
+            let weight = f32::from_be_bytes(wb);
+            let mut kb = [0u8; 2];
+            f.read_exact(&mut kb)?;
+            let n = u16::from_be_bytes(kb) as usize;
+            let mut props = HashMap::new();
+            for _ in 0..n {
+                let mut lb2 = [0u8; 2];
+                f.read_exact(&mut lb2)?;
+                let klen = u16::from_be_bytes(lb2) as usize;
+                let mut key = vec![0u8; klen];
+                f.read_exact(&mut key)?;
+                let key_str = String::from_utf8(key)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let value = Self::read_property_value(&mut f)?;
+                props.insert(key_str, value);
+            }
+            edge_data.insert((from, to), EdgeData { weight, properties: props });
+        }
+
         Ok(GPUEdgeBlockGraph {
             vertices,
             block_counts,
@@ -810,6 +906,7 @@ impl GPUEdgeBlockGraph {
             id_to_idx,
             vertex_props,
             total_edges,
+            edge_data,
             blocks_dirty: true,
             reverse_blocks_dirty: true,
             structure_dirty: true,
@@ -1063,5 +1160,55 @@ mod tests {
         assert!(!neighbors.contains(&130));
         assert!(neighbors.contains(&100));
         assert!(neighbors.contains(&163));
+    }
+
+    #[test]
+    fn test_edge_properties() {
+        let mut g = GPUEdgeBlockGraph::new();
+        g.add_vertex(1, HashMap::new());
+        g.add_vertex(2, HashMap::new());
+
+        let mut props = HashMap::new();
+        props.insert("label".to_string(), PropertyValue::String("knows".to_string()));
+        props.insert("since".to_string(), PropertyValue::Int(2024));
+        g.add_edge_with_props(1, 2, 0.75, props);
+
+        // 验证边属性
+        let ed = g.get_edge(1, 2).expect("edge should exist");
+        assert!((ed.weight - 0.75).abs() < 1e-6);
+        assert_eq!(ed.properties["label"], PropertyValue::String("knows".to_string()));
+        assert_eq!(ed.properties["since"], PropertyValue::Int(2024));
+
+        // 删除后丢失
+        g.remove_edge(1, 2);
+        assert!(g.get_edge(1, 2).is_none());
+    }
+
+    #[test]
+    fn test_edge_properties_roundtrip() {
+        let path = "/tmp/test_edge_props.bin";
+        let _ = std::fs::remove_file(path);
+
+        let mut g = GPUEdgeBlockGraph::new();
+        g.add_vertex(1, HashMap::new());
+        g.add_vertex(2, HashMap::new());
+        g.add_edge(1, 2, 0.5);
+
+        let mut props = HashMap::new();
+        props.insert("weight_tag".to_string(), PropertyValue::String("half".to_string()));
+        g.add_edge_with_props(2, 1, 0.5, props);
+
+        g.save(path).unwrap();
+        let g2 = GPUEdgeBlockGraph::open(path).unwrap();
+
+        let ed1 = g2.get_edge(1, 2).unwrap();
+        assert!((ed1.weight - 0.5).abs() < 1e-6);
+        assert!(ed1.properties.is_empty());
+
+        let ed2 = g2.get_edge(2, 1).unwrap();
+        assert!((ed2.weight - 0.5).abs() < 1e-6);
+        assert_eq!(ed2.properties["weight_tag"], PropertyValue::String("half".to_string()));
+
+        let _ = std::fs::remove_file(path);
     }
 }

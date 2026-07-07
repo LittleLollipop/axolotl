@@ -178,7 +178,7 @@ impl GraphDB {
             g.add_vertex(id, vr.properties.clone());
         }
         for ((from, to), er) in &pg.edges {
-            g.add_edge(*from, *to, er.weight as f32);
+            g.add_edge_with_props(*from, *to, er.weight as f32, er.properties.clone());
         }
         g
     }
@@ -200,7 +200,10 @@ impl GraphDB {
             let from_id = eb.idx_to_id[i];
             if from_id == u64::MAX { continue; }
             for to_id in eb.out_neighbors_by_idx(i) {
-                pg.add_edge(from_id, to_id, 1.0, HashMap::new());
+                let ed = eb.get_edge(from_id, to_id)
+                    .map(|d| (d.weight as f64, d.properties.clone()))
+                    .unwrap_or((1.0, HashMap::new()));
+                pg.add_edge(from_id, to_id, ed.0, ed.1);
             }
         }
         pg
@@ -270,23 +273,15 @@ impl GraphDB {
         }
     }
 
-    pub fn get_edge(&self, _from: u64, _to: u64) -> Option<(f64, HashMap<String, PropertyValue>)> {
+    pub fn get_edge(&self, from: u64, to: u64) -> Option<(f64, HashMap<String, PropertyValue>)> {
         match self.mode {
             GraphMode::InMemory => {
-                // EdgeBlock 不直接支持边属性查询，返回简单结果
-                let eb = self.edgeblock.as_ref().unwrap();
-                if let Some(&from_idx) = eb.id_to_idx.get(&_from) {
-                    if let Some(&to_idx) = eb.id_to_idx.get(&_to) {
-                        let neighbors = eb.out_neighbors_by_idx(from_idx);
-                        if neighbors.contains(&_to) {
-                            return Some((1.0, HashMap::new()));
-                        }
-                    }
-                }
-                None
+                self.edgeblock.as_ref().unwrap()
+                    .get_edge(from, to)
+                    .map(|ed| (ed.weight as f64, ed.properties.clone()))
             }
             GraphMode::Mmap => {
-                self.mmap.as_ref().unwrap().get_edge(_from, _to)
+                self.mmap.as_ref().unwrap().get_edge(from, to)
             }
         }
     }
@@ -400,11 +395,11 @@ impl GraphDB {
         from: u64,
         to: u64,
         weight: f64,
-        _properties: HashMap<String, PropertyValue>,
+        properties: HashMap<String, PropertyValue>,
     ) -> Result<(), GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                self.edgeblock.as_mut().unwrap().add_edge(from, to, weight as f32);
+                self.edgeblock.as_mut().unwrap().add_edge_with_props(from, to, weight as f32, properties);
                 Ok(())
             }
             GraphMode::Mmap => {
