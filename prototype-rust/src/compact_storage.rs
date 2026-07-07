@@ -334,7 +334,7 @@ fn encode_properties(props: &HashMap<String, PropertyValue>) -> Vec<u8> {
 
 /// 从紧凑字节数组解码属性
 fn decode_properties(buf: &[u8]) -> HashMap<String, PropertyValue> {
-    use std::io::{self, Read, Cursor};
+    use std::io::{Read, Cursor};
 
     let mut cursor = Cursor::new(buf);
     let mut len_buf = [0u8; 4];

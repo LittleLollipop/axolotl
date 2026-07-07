@@ -9,7 +9,7 @@ use crate::gpu::GPUAccelerator;
 use crate::gpu_edge_block::GPUEdgeBlockGraph;
 
 /// CPU/GPU 协同的增量 PageRank（EdgeBlock 版本）
-pub struct IncrementalPageRank_EdgeBlock {
+pub struct IncrementalPageRankEdgeBlock {
     /// GPU 加速器
     gpu: GPUAccelerator,
     /// EdgeBlock 格式的图
@@ -22,7 +22,7 @@ pub struct IncrementalPageRank_EdgeBlock {
     tolerance: f32,
 }
 
-impl IncrementalPageRank_EdgeBlock {
+impl IncrementalPageRankEdgeBlock {
     pub fn new(csr: &CSRGraph) -> Result<Self, String> {
         let gpu = GPUAccelerator::new()?;
         let edgeblock_graph = GPUEdgeBlockGraph::from_csr(
@@ -31,7 +31,7 @@ impl IncrementalPageRank_EdgeBlock {
             csr.vertex_count,
         );
         
-        Ok(IncrementalPageRank_EdgeBlock {
+        Ok(IncrementalPageRankEdgeBlock {
             gpu,
             edgeblock_graph,
             damping_factor: 0.85,
@@ -84,7 +84,7 @@ impl IncrementalPageRank_EdgeBlock {
             
             // 转换受影响的顶点为数组
             let affected_array: Vec<u32> = affected_set.iter().cloned().collect();
-            let affected_count = affected_array.len() as u32;
+            let _affected_count = affected_array.len() as u32;
             
             // 调用 GPU 计算受影响顶点的 PR 值
             let updated_pr = self.gpu.compute_incremental_pagerank_edgeblock(
@@ -161,7 +161,7 @@ mod tests {
         let edges = vec![(0, 1), (0, 2), (1, 2), (2, 0), (3, 4)];
         csr.build_csr(&edges);
         
-        let incremental_pr = IncrementalPageRank_EdgeBlock::new(&csr);
+        let incremental_pr = IncrementalPageRankEdgeBlock::new(&csr);
         if incremental_pr.is_err() {
             println!("⚠️  没有 GPU，跳过测试");
             return;

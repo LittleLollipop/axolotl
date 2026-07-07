@@ -10,7 +10,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use crate::PropertyValue;
-use crate::persistence::{PersistentGraph, VertexRecord, EdgeRecord};
+use crate::persistence::PersistentGraph;
 
 // ── 顶点查询 Builder ─────────────────────────
 
@@ -274,17 +274,17 @@ impl<'a> EdgeQuery<'a> {
 
 impl PersistentGraph {
     /// 开始顶点查询
-    pub fn find_vertex(&self) -> VertexQuery {
+    pub fn find_vertex(&self) -> VertexQuery<'_> {
         VertexQuery::new(self)
     }
 
     /// 开始边查询
-    pub fn find_edges(&self) -> EdgeQuery {
+    pub fn find_edges(&self) -> EdgeQuery<'_> {
         EdgeQuery::new(self)
     }
 
     /// 开始模式匹配查询
-    pub fn match_pattern(&self) -> PatternQuery {
+    pub fn match_pattern(&self) -> PatternQuery<'_> {
         PatternQuery::new(self)
     }
 }

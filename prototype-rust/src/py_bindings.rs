@@ -10,7 +10,6 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
-use pyo3::IntoPyObject;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -324,12 +323,13 @@ fn py_to_prop(val: &Bound<'_, PyAny>) -> PropertyValue {
     PropertyValue::Null
 }
 
+#[allow(deprecated)]
 fn prop_to_py(py: Python<'_>, val: &PropertyValue) -> PyObject {
     match val {
-        PropertyValue::Int(i)     => i.into_py(py),
-        PropertyValue::Double(f)  => f.into_py(py),
-        PropertyValue::String(s)  => s.clone().into_py(py),
-        PropertyValue::Bool(b)    => b.into_py(py),
+        PropertyValue::Int(i)     => i.to_object(py),
+        PropertyValue::Double(f)  => f.to_object(py),
+        PropertyValue::String(s)  => s.to_object(py),
+        PropertyValue::Bool(b)    => b.to_object(py),
         PropertyValue::Null       => py.None(),
     }
 }

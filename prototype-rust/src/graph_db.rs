@@ -544,7 +544,7 @@ impl GraphDB {
         match self.mode {
             GraphMode::InMemory => {
                 // EdgeBlock 暂不原生支持索引，通过 PersistentGraph 实现
-                let pg = self.to_persistent();
+                let _pg = self.to_persistent();
                 // TODO: 索引状态应该持久化在 GraphDB 中
                 Err(GraphDBError::NotSupported("create_index not yet supported with EdgeBlock.".to_string()))
             }

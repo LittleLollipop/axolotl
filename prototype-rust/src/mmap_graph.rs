@@ -45,7 +45,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{self, Write};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -138,6 +138,7 @@ fn encode_properties(props: &HashMap<String, PropertyValue>) -> Vec<u8> {
     buf
 }
 
+#[allow(unused_assignments)]
 fn decode_properties(buf: &[u8]) -> HashMap<String, PropertyValue> {
     if buf.len() < 4 { return HashMap::new(); }
     let mut cursor = 0;
@@ -374,7 +375,7 @@ impl MmapGraph {
     }
 
     /// 迭代所有顶点（O(n)，直接从 mmap 读）
-    pub fn iter_vertices(&self) -> MmapVertexIter {
+    pub fn iter_vertices(&self) -> MmapVertexIter<'_> {
         MmapVertexIter {
             graph: self,
             idx: 0,
@@ -382,7 +383,7 @@ impl MmapGraph {
     }
 
     /// 迭代所有边（O(e)，直接从 mmap 读）
-    pub fn iter_edges(&self) -> MmapEdgeIter {
+    pub fn iter_edges(&self) -> MmapEdgeIter<'_> {
         MmapEdgeIter {
             graph: self,
             idx: 0,
@@ -411,7 +412,7 @@ impl MmapGraph {
         // 添加边
         let mut edges: Vec<(u64, u64)> = Vec::with_capacity(self.edge_count);
         for i in 0..self.edge_count {
-            let (from, to, weight, _, _) = self.edge_idx(i);
+            let (from, to, _weight, _, _) = self.edge_idx(i);
             edges.push((from, to));
             // 记录权重（通过 csr.weights 设置，在 build_csr 之后）
         }

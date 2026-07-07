@@ -4,20 +4,19 @@
 // 使用 EdgeBlock 格式优化 GPU 内存访问
 // 无权图：所有边的权重都是 1，SSSP = BFS
 
-use std::collections::HashSet;
 use crate::csr_graph::CSRGraph;
 use crate::gpu::GPUAccelerator;
 use crate::gpu_edge_block::GPUEdgeBlockGraph;
 
 /// CPU/GPU 协同的增量 SSSP（EdgeBlock 版本，无权图）
-pub struct IncrementalSSSP_EdgeBlock {
+pub struct IncrementalSsspEdgeBlock {
     /// GPU 加速器
     gpu: GPUAccelerator,
     /// EdgeBlock 格式的图
     edgeblock_graph: GPUEdgeBlockGraph,
 }
 
-impl IncrementalSSSP_EdgeBlock {
+impl IncrementalSsspEdgeBlock {
     pub fn new(csr: &CSRGraph) -> Result<Self, String> {
         let gpu = GPUAccelerator::new()?;
         let edgeblock_graph = GPUEdgeBlockGraph::from_csr(
@@ -26,7 +25,7 @@ impl IncrementalSSSP_EdgeBlock {
             csr.vertex_count,
         );
         
-        Ok(IncrementalSSSP_EdgeBlock {
+        Ok(IncrementalSsspEdgeBlock {
             gpu,
             edgeblock_graph,
         })
@@ -42,7 +41,7 @@ impl IncrementalSSSP_EdgeBlock {
     /// 返回：更新后的距离数组
     pub fn compute(
         &self,
-        source: u32,
+        _source: u32,
         initial_distances: &[u32],
         affected_vertices: &[u32],
     ) -> Vec<u32> {
@@ -64,7 +63,7 @@ impl IncrementalSSSP_EdgeBlock {
         
         // BFS 主循环（无权图的 SSSP = BFS）
         while !frontier.is_empty() {
-            let frontier_len = frontier.len() as u32;
+            let _frontier_len = frontier.len() as u32;
             
             // 调用 GPU 计算
             let updated_distances = self.gpu.compute_incremental_sssp_edgeblock(
@@ -116,7 +115,7 @@ mod tests {
         let edges = vec![(0, 1), (0, 2), (1, 2), (2, 0), (3, 4)];
         csr.build_csr(&edges);
         
-        let incremental_sssp = IncrementalSSSP_EdgeBlock::new(&csr);
+        let incremental_sssp = IncrementalSsspEdgeBlock::new(&csr);
         if incremental_sssp.is_err() {
             println!("⚠️  没有 GPU，跳过测试");
             return;

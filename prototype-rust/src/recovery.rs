@@ -14,8 +14,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read};
 
-use crate::PropertyValue;
-use crate::persistence::{PersistentGraph, VertexRecord, EdgeRecord};
+use crate::persistence::PersistentGraph;
 
 // ── WAL 条目（与 transaction.rs 一致）─────────────────
 

@@ -176,7 +176,7 @@ impl GPUAccelerator {
     pub fn compute_incremental_pagerank(
         &self,
         csr_offsets: &[u32],
-        csr_targets: &[u32],
+        _csr_targets: &[u32],
         reverse_offsets: &[u32],  // 反向 CSR 的偏移数组
         reverse_targets: &[u32],  // 反向 CSR 的边数组
         pr: &[f32],
@@ -415,10 +415,10 @@ impl GPUAccelerator {
             let mut next_frontier = vec![0u32; vertex_count];
             let next_frontier_buffer = self.create_buffer(&next_frontier);
             
-            let mut next_count = vec![0u32; 1];
+            let next_count = vec![0u32; 1];
             let next_count_buffer = self.create_buffer(&next_count);
             
-            let mut visited_clone = visited.clone();
+            let visited_clone = visited.clone();
             let visited_buffer = self.create_buffer(&visited_clone);
             
             // 创建命令缓冲区和编码器
@@ -521,10 +521,10 @@ impl GPUAccelerator {
             let mut next_frontier = vec![0u32; vertex_count];
             let next_frontier_buffer = self.create_buffer(&next_frontier);
             
-            let mut next_count = vec![0u32; 1];
+            let next_count = vec![0u32; 1];
             let next_count_buffer = self.create_buffer(&next_count);
             
-            let mut visited_clone = visited.clone();
+            let visited_clone = visited.clone();
             let visited_buffer = self.create_buffer(&visited_clone);
             
             // 创建命令缓冲区和编码器

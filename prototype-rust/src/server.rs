@@ -29,7 +29,7 @@ impl ThreadPool {
         let receiver = Arc::new(Mutex::new(receiver));
         let mut workers = Vec::with_capacity(size);
 
-        for id in 0..size {
+        for _id in 0..size {
             let receiver = Arc::clone(&receiver);
             workers.push(thread::spawn(move || {
                 loop {
@@ -119,7 +119,7 @@ fn status_text(code: u16) -> &'static str {
     }
 }
 
-fn json_ok(status: u16, json: serde_json::Value) -> String {
+fn json_ok(_status: u16, json: serde_json::Value) -> String {
     json.to_string()
 }
 

@@ -3,7 +3,6 @@
 // 
 // 翻译自：/tmp/axolotl_tmp/Experiments/incremental_triangle_counting.swift
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 /// 使用邻接集合的图（用于 Triangle Counting）
@@ -165,7 +164,7 @@ pub fn incremental_triangle_counting(
 /// 增量 Triangle Counting（正确但较慢的方法：计算前后差值）
 pub fn incremental_triangle_counting_correct(
     graph: &GraphWithAdjacencySets,
-    new_edges: &[(u32, u32)],
+    _new_edges: &[(u32, u32)],
     triangles_before: &HashSet<[u32; 3]>,
 ) -> (usize, f64) {
     let start = std::time::Instant::now();

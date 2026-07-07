@@ -6,9 +6,9 @@
 // - 回滚
 // - 快照隔离（简化版）
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 

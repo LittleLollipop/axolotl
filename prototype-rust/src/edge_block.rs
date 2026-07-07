@@ -80,7 +80,7 @@ impl EdgeBlockGraph {
     }
     
     /// 添加边（自动构建 EdgeBlock）
-    pub fn add_edge(&mut self, from: u64, to: u64, weight: f64) {
+    pub fn add_edge(&mut self, from: u64, to: u64, _weight: f64) {
         // 确保顶点存在
         if !self.vertices.contains_key(&from) {
             self.add_vertex(from, HashMap::new());

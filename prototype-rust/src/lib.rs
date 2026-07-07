@@ -1,6 +1,9 @@
 // src/lib.rs
 // Axolotl-RS: 高性能图数据库库
 
+#![allow(ambiguous_glob_reexports)]
+#![allow(deprecated)] // pyo3 SIGNATURE deprecated, to be addressed in next release
+
 use thiserror::Error;
 
 pub mod graph;
@@ -38,10 +41,10 @@ pub use persistence::*;
 // pub use visualization::*;
 pub use edge_block::*; // 导出 EdgeBlock
 pub use csr_graph::*; // 导出 CSRGraph
-pub use incremental_pagerank::IncrementalPageRank_EdgeBlock; // 导出增量 PageRank (EdgeBlock)
+pub use incremental_pagerank::IncrementalPageRankEdgeBlock; // 导出增量 PageRank (EdgeBlock)
 pub use incremental_bfs::IncrementalBFS; // 导出增量 BFS
 pub use incremental_sssp::IncrementalSSSP; // 导出增量 SSSP
-pub use incremental_sssp_edgeblock::IncrementalSSSP_EdgeBlock; // 导出增量 SSSP (EdgeBlock)
+pub use incremental_sssp_edgeblock::IncrementalSsspEdgeBlock; // 导出增量 SSSP (EdgeBlock)
 pub use incremental_cc::IncrementalCC; // 导出增量 Connected ComponentsP
 
 // 导出 GPU 模块（仅在 macOS 上）

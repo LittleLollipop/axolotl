@@ -2,8 +2,8 @@
 // Axolotl-RS: 图算法实现（支持增量计算）
 
 use super::*;
-use rand::seq::SliceRandom;
 use std::collections::{HashMap, HashSet, VecDeque};
+use rand::prelude::SliceRandom;
 
 /// 图算法 trait（统一接口）
 pub trait GraphAlgorithms {
@@ -143,7 +143,6 @@ impl GraphAlgorithms for GraphDB {
         let sample_size = k.min(vertex_ids.len());
         
         // 采样 k 个顶点
-        use rand::seq::SliceRandom;
         let mut rng = rand::thread_rng();
         let sampled_vertices: Vec<VertexId> = vertex_ids
             .choose_multiple(&mut rng, sample_size)
