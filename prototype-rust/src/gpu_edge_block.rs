@@ -252,6 +252,156 @@ impl GPUEdgeBlockGraph {
         }
     }
 
+    // ── 删除操作 ─────────────────────────
+
+    /// 删除一条边 (from → to)
+    /// 返回 true 如果边存在且被删除
+    pub fn remove_edge(&mut self, from: u64, to: u64) -> bool {
+        let from_idx = match self.id_to_idx.get(&from) { Some(&i) => i, None => return false };
+        let to_idx = match self.id_to_idx.get(&to) { Some(&i) => i, None => return false };
+
+        // 1. 从正向 blocks 删除
+        let found_fwd = self.remove_from_blocks(from_idx, to_idx as u32, false);
+        // 2. 从反向 blocks 删除
+        let found_rev = self.remove_from_blocks(to_idx, from_idx as u32, true);
+
+        if found_fwd || found_rev {
+            self.total_edges = self.total_edges.saturating_sub(1);
+            self.blocks_dirty = true;
+            self.reverse_blocks_dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// 从指定顶点的 blocks 中删除一条边（内部方法）
+    fn remove_from_blocks(&mut self, owner_idx: usize, neighbor: u32, is_reverse: bool) -> bool {
+        let (vertices, block_counts, blocks) = if is_reverse {
+            (&mut self.reverse_vertices, &mut self.reverse_block_counts, &mut self.reverse_blocks)
+        } else {
+            (&mut self.vertices, &mut self.block_counts, &mut self.blocks)
+        };
+
+        let count = block_counts[owner_idx] as usize;
+        if count == 0 { return false; }
+
+        let first = vertices[owner_idx] as usize;
+
+        for b in 0..count {
+            let off = (first + b) * Self::BLOCK_SIZE_U32;
+            let ec = blocks[off + 1] as usize;
+            for e in 0..ec {
+                if blocks[off + 2 + e] == neighbor {
+                    // 找到了，shift 剩余边左移
+                    for j in e..ec.saturating_sub(1) {
+                        blocks[off + 2 + j] = blocks[off + 2 + j + 1];
+                    }
+                    // 清零最后一个槽位
+                    if ec > 0 {
+                        blocks[off + 2 + ec - 1] = 0;
+                    }
+                    blocks[off + 1] = (ec - 1) as u32;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// 删除顶点及其所有关联边
+    /// 返回被删除顶点的属性（如果存在）
+    pub fn remove_vertex(&mut self, id: u64) -> Option<HashMap<String, crate::PropertyValue>> {
+        let idx = self.id_to_idx.get(&id)?;
+        let idx = *idx;
+
+        // 1. 收集所有出边邻居（删除前获取）
+        let outgoing: Vec<usize> = self.collect_outgoing_targets(idx);
+
+        // 2. 收集所有入边源顶点（删除前获取）
+        let incoming_sources: Vec<usize> = self.collect_incoming_sources(idx);
+
+        // 3. 清空正向 blocks
+        self.clear_blocks(idx, false);
+
+        // 4. 从出边邻居的反向 blocks 中删除本顶点
+        for target_idx in &outgoing {
+            self.remove_from_blocks(*target_idx, idx as u32, true);
+        }
+
+        // 5. 从入边源顶点的正向 blocks 中删除指向本顶点的边
+        for src_idx in &incoming_sources {
+            self.remove_from_blocks(*src_idx, idx as u32, false);
+        }
+
+        // 6. 清空反向 blocks
+        self.clear_blocks(idx, true);
+
+        // 7. 标记删除
+        let props = std::mem::replace(&mut self.vertex_props[idx], HashMap::new());
+        self.id_to_idx.remove(&id);
+        self.idx_to_id[idx] = u64::MAX; // tombstone
+        self.total_edges = self.total_edges.saturating_sub(
+            (outgoing.len() + incoming_sources.len()) as u64);
+
+        self.structure_dirty = true;
+        Some(props)
+    }
+
+    /// 收集某顶点的所有出边目标
+    fn collect_outgoing_targets(&self, v_idx: usize) -> Vec<usize> {
+        let mut targets = Vec::new();
+        if v_idx >= self.block_counts.len() { return targets; }
+        let count = self.block_counts[v_idx] as usize;
+        if count == 0 { return targets; }
+        let first = self.vertices[v_idx] as usize;
+        for b in 0..count {
+            let off = (first + b) * Self::BLOCK_SIZE_U32;
+            let ec = self.blocks[off + 1] as usize;
+            for e in 0..ec {
+                targets.push(self.blocks[off + 2 + e] as usize);
+            }
+        }
+        targets
+    }
+
+    /// 清除顶点的所有 blocks
+    fn clear_blocks(&mut self, v_idx: usize, is_reverse: bool) {
+        let (vertices, block_counts, blocks) = if is_reverse {
+            (&mut self.reverse_vertices, &mut self.reverse_block_counts, &mut self.reverse_blocks)
+        } else {
+            (&mut self.vertices, &mut self.block_counts, &mut self.blocks)
+        };
+        let count = block_counts[v_idx] as usize;
+        if count == 0 { return; }
+        let first = vertices[v_idx] as usize;
+        for b in 0..count {
+            let off = (first + b) * Self::BLOCK_SIZE_U32;
+            blocks[off + 1] = 0; // edgeCount → 0
+        }
+        block_counts[v_idx] = 0;
+    }
+
+    /// 收集指向某顶点的所有源顶点
+    fn collect_incoming_sources(&self, target_idx: usize) -> Vec<usize> {
+        let mut sources = Vec::new();
+        if target_idx >= self.reverse_block_counts.len() { return sources; }
+        let count = self.reverse_block_counts[target_idx] as usize;
+        if count == 0 { return sources; }
+        let first = self.reverse_vertices[target_idx] as usize;
+        for b in 0..count {
+            let off = (first + b) * Self::BLOCK_SIZE_U32;
+            let ec = self.reverse_blocks[off + 1] as usize;
+            for e in 0..ec {
+                let src = self.reverse_blocks[off + 2 + e] as usize;
+                if src < self.idx_to_id.len() && self.idx_to_id[src] != u64::MAX {
+                    sources.push(src);
+                }
+            }
+        }
+        sources
+    }
+
     /// 获取顶点的所有出边邻居（外部 ID）
     pub fn out_neighbors(&self, id: u64) -> Vec<u64> {
         if let Some(&idx) = self.id_to_idx.get(&id) {
@@ -276,7 +426,9 @@ impl GPUEdgeBlockGraph {
             let edge_count = self.blocks[block_start + 1] as usize;
             for e in 0..edge_count {
                 let target_idx = self.blocks[block_start + 2 + e] as usize;
-                if target_idx < self.idx_to_id.len() {
+                if target_idx < self.idx_to_id.len()
+                    && self.idx_to_id[target_idx] != u64::MAX
+                {
                     result.push(self.idx_to_id[target_idx]);
                 }
             }
@@ -308,7 +460,9 @@ impl GPUEdgeBlockGraph {
             let edge_count = self.reverse_blocks[block_start + 1] as usize;
             for e in 0..edge_count {
                 let src_idx = self.reverse_blocks[block_start + 2 + e] as usize;
-                if src_idx < self.idx_to_id.len() {
+                if src_idx < self.idx_to_id.len()
+                    && self.idx_to_id[src_idx] != u64::MAX
+                {
                     result.push(self.idx_to_id[src_idx]);
                 }
             }
@@ -836,5 +990,78 @@ mod tests {
         assert_eq!(g2.out_neighbors(500), vec![501]);
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_remove_edge() {
+        let mut g = GPUEdgeBlockGraph::new();
+        g.add_vertex(1, HashMap::new());
+        g.add_vertex(2, HashMap::new());
+        g.add_vertex(3, HashMap::new());
+        g.add_edge(1, 2, 1.0);
+        g.add_edge(1, 3, 1.0);
+        g.add_edge(2, 3, 1.0);
+
+        assert_eq!(g.total_edges, 3);
+
+        // 删除 1→2
+        let removed = g.remove_edge(1, 2);
+        assert!(removed);
+        assert_eq!(g.total_edges, 2);
+        assert_eq!(g.out_neighbors(1), vec![3]);
+        assert_eq!(g.in_neighbors(2), Vec::<u64>::new());
+
+        // 删除不存在的边
+        let removed = g.remove_edge(1, 2);
+        assert!(!removed);
+        assert_eq!(g.total_edges, 2);
+    }
+
+    #[test]
+    fn test_remove_vertex() {
+        let mut g = GPUEdgeBlockGraph::new();
+        g.add_vertex(1, HashMap::new());
+        g.add_vertex(2, HashMap::new());
+        g.add_vertex(3, HashMap::new());
+        g.add_edge(1, 2, 1.0);
+        g.add_edge(1, 3, 1.0);
+        g.add_edge(2, 3, 1.0);
+        g.add_edge(3, 1, 1.0);
+
+        assert_eq!(g.total_edges, 4);
+
+        // 删除顶点 1
+        let props = g.remove_vertex(1);
+        assert!(props.is_some());
+        assert_eq!(g.get_vertex(1), None); // 顶点被删除
+        assert_eq!(g.out_neighbors(1), Vec::<u64>::new()); // 所有出边清除
+        assert_eq!(g.in_neighbors(1), Vec::<u64>::new()); // 所有入边清除
+
+        // 顶点 2 不再有 1→2 的入边
+        assert_eq!(g.in_neighbors(2), Vec::<u64>::new());
+        // 但 2→3 还在
+        assert_eq!(g.out_neighbors(2), vec![3]);
+    }
+
+    #[test]
+    fn test_remove_edge_across_blocks() {
+        let mut g = GPUEdgeBlockGraph::new();
+        let center = g.add_vertex(1, HashMap::new());
+
+        // 添加 64 条边（跨 2 个 block）
+        for i in 0..64u64 {
+            let id = 100 + i;
+            g.add_vertex(id, HashMap::new());
+            g.add_edge(1, id, 1.0);
+        }
+        assert_eq!(g.total_edges, 64);
+
+        // 删除中间一条边
+        g.remove_edge(1, 130);
+        assert_eq!(g.total_edges, 63);
+        let neighbors = g.out_neighbors(1);
+        assert!(!neighbors.contains(&130));
+        assert!(neighbors.contains(&100));
+        assert!(neighbors.contains(&163));
     }
 }

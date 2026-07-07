@@ -353,10 +353,10 @@ impl GraphDB {
         }
     }
 
-    pub fn delete_vertex(&mut self, _id: u64) -> Result<Option<HashMap<String, PropertyValue>>, GraphDBError> {
+    pub fn delete_vertex(&mut self, id: u64) -> Result<Option<HashMap<String, PropertyValue>>, GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                Err(GraphDBError::NotSupported("delete_vertex not yet supported in EdgeBlock. Use PersistentGraph for deletions.".to_string()))
+                Ok(self.edgeblock.as_mut().unwrap().remove_vertex(id))
             }
             GraphMode::Mmap => {
                 Err(GraphDBError::NotSupported("delete_vertex not supported in Mmap mode.".to_string()))
@@ -364,10 +364,15 @@ impl GraphDB {
         }
     }
 
-    pub fn delete_edge(&mut self, _from: u64, _to: u64) -> Result<Option<(f64, HashMap<String, PropertyValue>)>, GraphDBError> {
+    pub fn delete_edge(&mut self, from: u64, to: u64) -> Result<Option<(f64, HashMap<String, PropertyValue>)>, GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                Err(GraphDBError::NotSupported("delete_edge not yet supported in EdgeBlock.".to_string()))
+                let found = self.edgeblock.as_mut().unwrap().remove_edge(from, to);
+                if found {
+                    Ok(Some((1.0, HashMap::new())))
+                } else {
+                    Ok(None)
+                }
             }
             GraphMode::Mmap => {
                 Err(GraphDBError::NotSupported("delete_edge not supported in Mmap mode.".to_string()))
