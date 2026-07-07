@@ -469,6 +469,260 @@ impl GPUEdgeBlockGraph {
             self.total_edges as usize,
         )
     }
+
+    // ── 原生二进制持久化 ─────────────────────────
+
+    const MAGIC: [u8; 4] = *b"AXEB";  // Axolotl EdgeBlock
+    const FILE_VERSION: u16 = 1;
+
+    /// 保存为原生 EdgeBlock 二进制格式
+    ///
+    /// 文件格式：
+    /// ```
+    /// Header (24 bytes):
+    ///   magic: [u8; 4] = "AXEB"
+    ///   version: u16 BE
+    ///   block_capacity: u16 BE (always 32)
+    ///   vertex_count: u32 BE
+    ///   total_edges: u64 BE
+    ///   reserved: [u8; 4]
+    ///
+    /// Sections (each: u32 BE len + bytes):
+    ///   idx_to_id:     u64[]
+    ///   vertices:      u32[]
+    ///   block_counts:  u32[]
+    ///   blocks:        u32[]
+    ///   rev_vertices:  u32[]
+    ///   rev_blk_cnts:  u32[]
+    ///   rev_blocks:    u32[]
+    ///   vertex_props:  encoded properties
+    /// ```
+    pub fn save(&self, file_path: &str) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut buf: Vec<u8> = Vec::new();
+
+        // Header
+        buf.extend_from_slice(&Self::MAGIC);
+        buf.extend_from_slice(&Self::FILE_VERSION.to_be_bytes());
+        buf.extend_from_slice(&(Self::BLOCK_CAPACITY as u16).to_be_bytes());
+        buf.extend_from_slice(&(self.vertex_count).to_be_bytes());
+        buf.extend_from_slice(&self.total_edges.to_be_bytes());
+        buf.extend_from_slice(&[0u8; 4]);
+
+        // Helper: write u32 array
+        fn write_u32_slice(buf: &mut Vec<u8>, data: &[u32]) {
+            buf.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            for &v in data {
+                buf.extend_from_slice(&v.to_be_bytes());
+            }
+        }
+        // Helper: write u64 array
+        fn write_u64_slice(buf: &mut Vec<u8>, data: &[u64]) {
+            buf.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            for &v in data {
+                buf.extend_from_slice(&v.to_be_bytes());
+            }
+        }
+
+        write_u64_slice(&mut buf, &self.idx_to_id);
+        write_u32_slice(&mut buf, &self.vertices);
+        write_u32_slice(&mut buf, &self.block_counts);
+        write_u32_slice(&mut buf, &self.blocks);
+        write_u32_slice(&mut buf, &self.reverse_vertices);
+        write_u32_slice(&mut buf, &self.reverse_block_counts);
+        write_u32_slice(&mut buf, &self.reverse_blocks);
+
+        // Vertex properties: count + per-vertex entries
+        let prop_count = self.vertex_props.len() as u32;
+        buf.extend_from_slice(&prop_count.to_be_bytes());
+        for props in &self.vertex_props {
+            let n = props.len() as u16;
+            buf.extend_from_slice(&n.to_be_bytes());
+            for (key, value) in props {
+                let kb = key.as_bytes();
+                buf.extend_from_slice(&(kb.len() as u16).to_be_bytes());
+                buf.extend_from_slice(kb);
+                Self::write_property_value(&mut buf, value);
+            }
+        }
+
+        // 原子写入
+        let tmp = format!("{}.tmp", file_path);
+        {
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(&buf)?;
+            f.sync_all()?;
+        }
+        std::fs::rename(&tmp, file_path)?;
+        Ok(())
+    }
+
+    /// 从原生 EdgeBlock 二进制文件加载
+    pub fn open(file_path: &str) -> std::io::Result<Self> {
+        use std::io::Read;
+        let mut f = std::fs::File::open(file_path)?;
+
+        // Header
+        let mut magic = [0u8; 4];
+        f.read_exact(&mut magic)?;
+        if magic != Self::MAGIC {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
+                "Invalid AXEB magic bytes"));
+        }
+
+        let mut hdr = [0u8; 20];
+        f.read_exact(&mut hdr)?;
+        let _version = u16::from_be_bytes([hdr[0], hdr[1]]);
+        let _cap = u16::from_be_bytes([hdr[2], hdr[3]]);
+        let vertex_count = u32::from_be_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]);
+        let total_edges = u64::from_be_bytes([
+            hdr[8], hdr[9], hdr[10], hdr[11],
+            hdr[12], hdr[13], hdr[14], hdr[15],
+        ]);
+
+        // Helper: read u32 array
+        fn read_u32_vec(f: &mut std::fs::File) -> std::io::Result<Vec<u32>> {
+            let mut lb = [0u8; 4];
+            f.read_exact(&mut lb)?;
+            let len = u32::from_be_bytes(lb) as usize;
+            let mut out = vec![0u32; len];
+            for i in 0..len {
+                let mut b = [0u8; 4];
+                f.read_exact(&mut b)?;
+                out[i] = u32::from_be_bytes(b);
+            }
+            Ok(out)
+        }
+        // Helper: read u64 array
+        fn read_u64_vec(f: &mut std::fs::File) -> std::io::Result<Vec<u64>> {
+            let mut lb = [0u8; 4];
+            f.read_exact(&mut lb)?;
+            let len = u32::from_be_bytes(lb) as usize;
+            let mut out = vec![0u64; len];
+            for i in 0..len {
+                let mut b = [0u8; 8];
+                f.read_exact(&mut b)?;
+                out[i] = u64::from_be_bytes(b);
+            }
+            Ok(out)
+        }
+
+        let idx_to_id = read_u64_vec(&mut f)?;
+        let vertices = read_u32_vec(&mut f)?;
+        let block_counts = read_u32_vec(&mut f)?;
+        let blocks = read_u32_vec(&mut f)?;
+        let reverse_vertices = read_u32_vec(&mut f)?;
+        let reverse_block_counts = read_u32_vec(&mut f)?;
+        let reverse_blocks = read_u32_vec(&mut f)?;
+
+        // ID mapping
+        let id_to_idx: std::collections::HashMap<u64, usize> =
+            idx_to_id.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+
+        // Properties
+        let mut lb = [0u8; 4];
+        f.read_exact(&mut lb)?;
+        let prop_count = u32::from_be_bytes(lb) as usize;
+        let mut vertex_props = Vec::with_capacity(prop_count);
+        for _ in 0..prop_count {
+            let mut kb = [0u8; 2];
+            f.read_exact(&mut kb)?;
+            let n = u16::from_be_bytes(kb) as usize;
+            let mut props = std::collections::HashMap::new();
+            for _ in 0..n {
+                let mut lb2 = [0u8; 2];
+                f.read_exact(&mut lb2)?;
+                let klen = u16::from_be_bytes(lb2) as usize;
+                let mut key = vec![0u8; klen];
+                f.read_exact(&mut key)?;
+                let key_str = String::from_utf8(key)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let value = Self::read_property_value(&mut f)?;
+                props.insert(key_str, value);
+            }
+            vertex_props.push(props);
+        }
+
+        Ok(GPUEdgeBlockGraph {
+            vertices,
+            block_counts,
+            blocks,
+            reverse_vertices,
+            reverse_block_counts,
+            reverse_blocks,
+            vertex_count,
+            block_capacity: Self::BLOCK_CAPACITY,
+            idx_to_id,
+            id_to_idx,
+            vertex_props,
+            total_edges,
+            blocks_dirty: true,
+            reverse_blocks_dirty: true,
+            structure_dirty: true,
+        })
+    }
+
+    // ── Property value encoding ──
+
+    fn write_property_value(w: &mut Vec<u8>, pv: &crate::PropertyValue) {
+        match pv {
+            crate::PropertyValue::String(s) => {
+                w.push(0); // type tag
+                let b = s.as_bytes();
+                w.extend_from_slice(&(b.len() as u32).to_be_bytes());
+                w.extend_from_slice(b);
+            }
+            crate::PropertyValue::Int(i) => {
+                w.push(1);
+                w.extend_from_slice(&(*i as i64).to_be_bytes());
+            }
+            crate::PropertyValue::Double(d) => {
+                w.push(2);
+                w.extend_from_slice(&d.to_be_bytes());
+            }
+            crate::PropertyValue::Bool(b) => {
+                w.push(3);
+                w.push(*b as u8);
+            }
+            crate::PropertyValue::Null => {
+                w.push(4);
+            }
+        }
+    }
+
+    fn read_property_value(f: &mut std::fs::File) -> std::io::Result<crate::PropertyValue> {
+        use std::io::Read;
+        let mut tag = [0u8; 1];
+        f.read_exact(&mut tag)?;
+        match tag[0] {
+            0 => { // String
+                let mut lb = [0u8; 4];
+                f.read_exact(&mut lb)?;
+                let len = u32::from_be_bytes(lb) as usize;
+                let mut buf = vec![0u8; len];
+                f.read_exact(&mut buf)?;
+                let s = String::from_utf8(buf)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                Ok(crate::PropertyValue::String(s))
+            }
+            1 => { // Int
+                let mut b = [0u8; 8];
+                f.read_exact(&mut b)?;
+                Ok(crate::PropertyValue::Int(i64::from_be_bytes(b)))
+            }
+            2 => { // Double
+                let mut b = [0u8; 8];
+                f.read_exact(&mut b)?;
+                Ok(crate::PropertyValue::Double(f64::from_be_bytes(b)))
+            }
+            3 => { // Bool
+                let mut b = [0u8; 1];
+                f.read_exact(&mut b)?;
+                Ok(crate::PropertyValue::Bool(b[0] != 0))
+            }
+            _ => Ok(crate::PropertyValue::Null),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -528,5 +782,59 @@ mod tests {
         assert_eq!(degs[g.id_to_idx[&1]], 2);
         assert_eq!(degs[g.id_to_idx[&2]], 1);
         assert_eq!(degs[g.id_to_idx[&3]], 0);
+    }
+
+    #[test]
+    fn test_save_load_roundtrip() {
+        let path = "/tmp/test_edgeblock_native.bin";
+        let _ = std::fs::remove_file(path);
+
+        // 创建并保存
+        let mut g = GPUEdgeBlockGraph::new();
+        let mut a_props = HashMap::new();
+        a_props.insert("name".to_string(), crate::PropertyValue::String("A".to_string()));
+        a_props.insert("age".to_string(), crate::PropertyValue::Int(42));
+        g.add_vertex(10, a_props);
+        g.add_vertex(20, HashMap::new());
+        g.add_edge(10, 20, 1.0);
+
+        g.save(path).expect("save failed");
+
+        // 加载
+        let g2 = GPUEdgeBlockGraph::open(path).expect("open failed");
+
+        assert_eq!(g2.vertex_count, 2);
+        assert_eq!(g2.total_edges, 1);
+        assert_eq!(g2.out_neighbors(10), vec![20]);
+
+        let props = g2.get_vertex(10).unwrap();
+        assert_eq!(props["name"], crate::PropertyValue::String("A".to_string()));
+        assert_eq!(props["age"], crate::PropertyValue::Int(42));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_save_load_large() {
+        let path = "/tmp/test_edgeblock_large.bin";
+        let _ = std::fs::remove_file(path);
+
+        let mut g = GPUEdgeBlockGraph::new();
+        for i in 0..1000u64 {
+            g.add_vertex(i, HashMap::new());
+        }
+        for i in 0..999 {
+            g.add_edge(i, i + 1, 1.0);
+        }
+
+        g.save(path).expect("save failed");
+        let g2 = GPUEdgeBlockGraph::open(path).expect("open failed");
+
+        assert_eq!(g2.vertex_count, 1000);
+        assert_eq!(g2.total_edges, 999);
+        assert_eq!(g2.out_neighbors(0), vec![1]);
+        assert_eq!(g2.out_neighbors(500), vec![501]);
+
+        let _ = std::fs::remove_file(path);
     }
 }

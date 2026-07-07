@@ -84,8 +84,15 @@ impl GraphDB {
                 if !std::path::Path::new(path_str).exists() {
                     return Err(GraphDBError::Io(format!("file {} not found", path_str)));
                 }
-                // 从 PersistentGraph 加载（兼容旧格式），然后转为 EdgeBlock
-                // TODO: 直接实现 EdgeBlock 的二进制持久化
+                // 优先使用原生 EdgeBlock 格式加载
+                if let Ok(eb) = crate::gpu_edge_block::GPUEdgeBlockGraph::open(path_str) {
+                    return Ok(GraphDB {
+                        mode,
+                        edgeblock: Some(eb),
+                        mmap: None,
+                    });
+                }
+                // 回退到旧 PersistentGraph 格式
                 let pg = crate::PersistentGraph::open(path_str)?;
                 let eb = Self::persistent_to_edgeblock(&pg);
                 Ok(GraphDB {
@@ -384,10 +391,9 @@ impl GraphDB {
     pub fn save_to(&self, file_path: &str) -> Result<(), GraphDBError> {
         match self.mode {
             GraphMode::InMemory => {
-                let pg = self.to_persistent();
-                let mut pg = pg;
-                pg.file_path = file_path.to_string();
-                pg.save().map_err(|e| GraphDBError::Io(e.to_string()))?;
+                // 使用 EdgeBlock 原生二进制持久化
+                self.edgeblock.as_ref().unwrap().save(file_path)
+                    .map_err(|e| GraphDBError::Io(e.to_string()))?;
                 Ok(())
             }
             GraphMode::Mmap => {
