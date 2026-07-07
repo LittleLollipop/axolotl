@@ -7,11 +7,52 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
 use crate::graph_db::{GraphDB, GraphMode};
 use crate::PropertyValue;
+
+// ── 线程池（微型，std-only）─────────────────
+
+const POOL_SIZE: usize = 16;
+
+struct ThreadPool {
+    workers: Vec<thread::JoinHandle<()>>,
+    sender: std::sync::mpsc::Sender<Box<dyn FnOnce() + Send + 'static>>,
+}
+
+impl ThreadPool {
+    fn new(size: usize) -> Self {
+        let (sender, receiver) = std::sync::mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>();
+        let receiver = Arc::new(Mutex::new(receiver));
+        let mut workers = Vec::with_capacity(size);
+
+        for id in 0..size {
+            let receiver = Arc::clone(&receiver);
+            workers.push(thread::spawn(move || {
+                loop {
+                    let job = {
+                        let rx = receiver.lock().unwrap();
+                        rx.recv()
+                    };
+                    match job {
+                        Ok(job) => job(),
+                        Err(_) => break,
+                    }
+                }
+            }));
+        }
+
+        ThreadPool { workers, sender }
+    }
+
+    fn execute<F>(&self, f: F)
+    where F: FnOnce() + Send + 'static
+    {
+        let _ = self.sender.send(Box::new(f));
+    }
+}
 
 // ── 共享状态 ─────────────────────────
 
@@ -244,8 +285,10 @@ fn handle_pagerank(body: &[u8], state: &SharedGraph) -> (u16, String) {
             iterations = i as usize;
         }
     }
-    let g = state.read().unwrap();
-    let csr = g.to_csr();
+    let csr = {
+        let g = state.read().unwrap();
+        g.to_csr()
+    }; // 释放锁，算法在锁外计算
     let pr = crate::pagerank_correct::compute_pagerank_cpu(&csr, iterations);
     let sum: f32 = pr.iter().sum();
     let scores: Vec<serde_json::Value> = pr.iter().enumerate()
@@ -435,11 +478,13 @@ pub fn serve(addr: &str, graph: GraphDB) {
     println!("   POST /algorithms/bfs      {{\"source\": 0}}");
     println!();
 
+    let pool = ThreadPool::new(POOL_SIZE);
+
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
                 let state = state.clone();
-                thread::spawn(move || {
+                pool.execute(move || {
                     let req = match parse_request(&mut stream) {
                         Some(r) => r,
                         None => {
