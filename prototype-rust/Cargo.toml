@@ -3,6 +3,10 @@ name = "axolotl-rs"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "axolotl_rs"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 # 高性能图论库
 petgraph = { version = "0.6", features = ["serde"] }
@@ -38,6 +42,9 @@ dispatch = "0.2"
 
 # 内存映射（用于大于内存的图）
 memmap2 = "0.9"
+
+# Python 绑定
+pyo3 = { version = "0.23", features = ["extension-module"] }
 
 [dev-dependencies]
 # 基准测试
