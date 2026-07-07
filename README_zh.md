@@ -13,7 +13,7 @@
 ⚡ **增量算法**：BFS **1580×**，连通分量 **4920×**（相对于全量重算）  
 🔬 **正确性优先**：PageRank PR 和 = 1.0，77 个单元测试验证  
 
-📖 **[English Documentation](README.md)** | 📄 **[技术报告 (arXiv 预备稿)](edgeblock-technical-report.md)**
+📖 **[English Documentation](README.md)** | 📄 **[技术报告 (arXiv 预备稿)](docs/EdgeBlock-Technical-Report.md)**
 
 ---
 
@@ -231,7 +231,7 @@ Apple M4 的统一内存架构（CPU/GPU 共享物理地址空间）提供了新
 | 连通分量 | 7.38 | 0.002 | **4920x** |
 | PageRank | 59.85 | 3.17 | **18.9x** |
 
-> **说明**：加速比反映最佳场景（50/50,000 顶点受影响），为性能上限——详见[技术报告](edgeblock-technical-report.md)。
+> **说明**：加速比反映最佳场景（50/50,000 顶点受影响），为性能上限——详见[技术报告](docs/EdgeBlock-Technical-Report.md)。
 
 ### GPU Buffer 缓存复用（Rust）
 
@@ -305,6 +305,7 @@ swift incremental_pagerank.swift
 
 详见：
 
+- **[EdgeBlock 技术报告](core-research/docs/EdgeBlock-Technical-Report.md)** — arXiv 预印本草案
 - **[Rust 实现指南](prototype-rust/README.md)** — 完整 API 参考、架构、示例
 - **[事务设计](prototype-rust/TRANSACTION_DESIGN.md)** — WAL、MVCC、崩溃恢复设计
 - **[项目原则](core-research/algorithm-research/PROJECT_PRINCIPLES.md)** — 设计哲学
