@@ -6,16 +6,14 @@
 [![Platform](https://img.shields.io/badge/Platform-macOS%2014+-lightgrey.svg)]()
 [![Metal](https://img.shields.io/badge/Metal-3.2-green.svg)](https://developer.apple.com/metal/)
 
-**High-performance graph database with incremental algorithms and GPU acceleration for unified memory architectures (Apple Silicon)**
+**High-performance graph database with incremental algorithms and GPU acceleration, designed for unified memory architectures**
 
-Axolotl is a research project exploring graph algorithm optimizations for unified memory architectures. It provides:
+🧱 **EdgeBlock**: A new class of data structure for the unified memory era — balancing GPU warp coalescing with CPU mutability  
+🚀 **CPU+GPU Collaboration**: CPU schedules, GPU computes — on the same data, zero-copy  
+⚡ **Incremental Algorithms**: BFS **1580×**, Connected Components **4920×** over full recomputation  
+🔬 **Correctness First**: PageRank PR sum = 1.0, 77 unit tests verified  
 
-- 🧱 **EdgeBlock**: A novel graph data structure optimized for GPU coalesced memory access
-- 🚀 **CPU+GPU Collaboration**: CPU schedules tasks, GPU executes computations (unified memory)
-- ⚡ **Incremental Algorithms**: Only update affected vertices (PageRank, BFS, SSSP)
-- 🔬 **Correctness First**: PageRank PR sum = 1.0 (handles dangling nodes correctly)
-
-📖 **[中文文档](README_zh.md)**
+📖 **[中文文档](README_zh.md)** | 📄 **[技术报告 (arXiv draft)](edgeblock-technical-report.md)**
 
 ---
 
@@ -129,14 +127,15 @@ axolotl/
 
 ### 1. EdgeBlock Data Structure
 
-**Problem**: Traditional CSR (Compressed Sparse Row) format stores edges as contiguous arrays per vertex, but GPU access patterns suffer from non-coalesced memory access.
+**Problem**: Traditional CSR stores edges as contiguous arrays per vertex. GPU access patterns suffer from non-coalesced memory access. Worse, CSR forces a hard choice: it is GPU-friendly but hostile to CPU incremental updates—each edge insertion requires rebuilding the entire offset array.
 
-**Solution**: **EdgeBlock** groups edges into fixed-size blocks (32 edges per block), enabling coalesced GPU memory access.
+**Why it matters now**: Unified memory removes the physical separation between CPU and GPU memory. This eliminates the luxury of choosing one format over the other. A data structure on unified memory must serve both: flat enough for GPU warp coalescing, mutable enough for CPU incremental updates. EdgeBlock is a first attempt at resolving this structural tension.
 
-**Results** (Swift prototype):
-- ✅ 1.20x - 1.42x speedup for BFS on power-law graphs
-- ✅ 1.27x speedup for PageRank
-- ✅ Advantage increases with graph size (peak at 100K vertices)
+**Solution**: **EdgeBlock** groups edges into fixed-size blocks (32 edges = GPU warp width). Blocks are stored contiguously in a single `Vec<u32>` shared by CPU and GPU via Metal's `StorageModeShared`. Edge insertion is O(1) amortized—append to the last block, create a new one when full. No format conversion needed between CPU traversal and GPU kernel execution.
+
+**Results**:
+- ✅ 61–83% faster data loading vs. CSR pipelines (no two-pass construction)
+- ✅ **1580×** incremental BFS, **4920×** incremental CC
 
 ### 2. CPU+GPU Collaborative Algorithms
 
@@ -187,13 +186,15 @@ PR(v) = (1-d)/N + d × Σ PR(u) / out_degree(u)
 | GPU Incremental | 1.0000 | < 1e-6 | ✅ |
 | GPU Full | 1.0000 | < 1e-6 | ✅ |
 
-### Incremental Algorithm Speedup (Rust, 50K vertices)
+### Incremental Algorithm Speedup (Rust, 50K vertices, +50 edges)
 
-| Algorithm | Full (ms) | Incremental (ms) | Speedup | Target |
-|-----------|-----------|-------------------|---------|:------:|
-| BFS | 1.91 | 0.001 | **1580x** | 80x ✅ |
-| Connected Components | 7.38 | 0.002 | **4920x** | 74x ✅ |
-| PageRank | 59.85 | 3.17 | **18.9x** | 244x ⚠️ |
+| Algorithm | Full (ms) | Incremental (ms) | Speedup |
+|-----------|-----------|-------------------|---------|
+| BFS | 1.91 | 0.001 | **1580x** |
+| Connected Components | 7.38 | 0.002 | **4920x** |
+| PageRank | 59.85 | 3.17 | **18.9x** |
+
+> **Note**: Speedups reflect best-case (50/50,000 vertices affected). These are upper bounds — see [technical report](edgeblock-technical-report.md) for details.
 
 ### GPU Buffer Cache Reuse (Rust)
 
@@ -369,7 +370,7 @@ kernel void pagerank_edgeblock_optimized(
 - [x] ~~Persistence: Binary graph format~~
 - [x] ~~Simple query interface: neighbors, paths, rankings~~
 - [x] ~~REST API server~~
-- [ ] **Python bindings**: PyO3 integration for data science workflows
+- [x] ~~Python bindings: PyO3 integration~~ → `pip install` ready
 - [ ] **Incremental PageRank performance optimization**: GPU kernel path improvements
 
 ### Medium-term (3-6 months)
@@ -417,8 +418,8 @@ If you use Axolotl in your research, please cite:
 
 ```bibtex
 @software{axolotl2026,
-  author = {LittleLollipop},
-  title = {Axolotl: Unified Memory Graph Algorithms for Apple Silicon},
+  author = {Yan, Lu},
+  title = {Axolotl: Unified Memory Graph Algorithms with EdgeBlock Format},
   year = {2026},
   url = {https://github.com/LittleLollipop/axolotl}
 }

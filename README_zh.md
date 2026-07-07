@@ -6,16 +6,14 @@
 [![Platform](https://img.shields.io/badge/Platform-macOS%2014+-lightgrey.svg)]()
 [![Metal](https://img.shields.io/badge/Metal-3.2-green.svg)](https://developer.apple.com/metal/)
 
-**面向 Apple Silicon 统一内存架构的高性能图数据库，支持增量算法和 GPU 加速**
+**面向统一内存架构的高性能图数据库，支持增量算法和 GPU 加速**
 
-Axolotl 是一个探索统一内存架构下图算法优化的研究项目。主要特性：
+🧱 **EdgeBlock**：统一内存时代的新型数据结构——兼顾 GPU warp 合并访问与 CPU 可变性  
+🚀 **CPU+GPU 协同**：CPU 调度，GPU 计算——同一份数据，零拷贝  
+⚡ **增量算法**：BFS **1580×**，连通分量 **4920×**（相对于全量重算）  
+🔬 **正确性优先**：PageRank PR 和 = 1.0，77 个单元测试验证  
 
-- 🧱 **EdgeBlock**: 一种为 GPU 合并内存访问优化的新型图数据结构
-- 🚀 **CPU+GPU 协同**: CPU 调度任务，GPU 执行计算（统一内存）
-- ⚡ **增量算法**: 只更新受影响的顶点（PageRank、BFS、SSSP）
-- 🔬 **正确性优先**: PageRank PR 值之和 = 1.0（正确处理悬挂顶点）
-
-📖 **[English Documentation](README.md)**
+📖 **[English Documentation](README.md)** | 📄 **[技术报告 (arXiv 预备稿)](edgeblock-technical-report.md)**
 
 ---
 
@@ -225,13 +223,15 @@ Apple M4 的统一内存架构（CPU/GPU 共享物理地址空间）提供了新
 | GPU 增量版本 | 1.0000 | < 1e-6 | ✅ |
 | GPU 全量版本 | 1.0000 | < 1e-6 | ✅ |
 
-### 增量算法加速比（Rust，5万顶点实测）
+### 增量算法加速比（Rust，5万顶点，+50条边）
 
-| 算法 | 全量 (ms) | 增量 (ms) | 加速比 | 目标 |
-|------|-----------|-----------|--------|:--:|
-| BFS | 1.91 | 0.001 | **1580x** | 80x ✅ |
-| 连通分量 | 7.38 | 0.002 | **4920x** | 74x ✅ |
-| PageRank | 59.85 | 3.17 | **18.9x** | 244x ⚠️ |
+| 算法 | 全量 (ms) | 增量 (ms) | 加速比 |
+|------|-----------|-----------|--------|
+| BFS | 1.91 | 0.001 | **1580x** |
+| 连通分量 | 7.38 | 0.002 | **4920x** |
+| PageRank | 59.85 | 3.17 | **18.9x** |
+
+> **说明**：加速比反映最佳场景（50/50,000 顶点受影响），为性能上限——详见[技术报告](edgeblock-technical-report.md)。
 
 ### GPU Buffer 缓存复用（Rust）
 
@@ -406,7 +406,7 @@ kernel void pagerank_edgeblock_optimized(
 - [x] ~~持久化：二进制图格式~~
 - [x] ~~简单查询接口：邻居、路径、排名~~
 - [x] ~~REST API 服务器~~
-- [ ] **Python 绑定**：PyO3 集成，用于数据科学工作流
+- [x] ~~Python 绑定：PyO3 集成~~ → `pip install` 可用
 - [ ] **增量 PageRank 性能优化**：GPU kernel 调用路径改进
 
 ### 中期（3-6 个月）
