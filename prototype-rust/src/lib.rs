@@ -24,12 +24,13 @@ pub mod incremental_sssp_edgeblock; // CPU/GPU 协同的增量 SSSP（使用 Edg
 pub mod pagerank_correct; // PageRank CPU 正确实现
 pub mod incremental_cc; // 增量 Connected Components（使用 Union-Find）
 pub mod incremental_tc; // 增量 Triangle Counting（三角形计数）
+pub mod server; // REST API 网络层
 
 // GPU 模块（仅在 macOS 上编译）
 #[cfg(target_os = "macos")]
 pub mod gpu; // GPU 加速模块（使用 Metal）
 
-pub use graph::GraphDB;
+pub use graph::GraphDB; // 旧版本
 pub use algorithms::*;
 pub use persistence::*;
 // pub use visualization::*;
