@@ -221,12 +221,26 @@ Apple M4 的统一内存架构（CPU/GPU 共享物理地址空间）提供了新
 
 | 实现方式 | PR 值之和 | 最大误差 | 状态 |
 |---------|----------|---------|------|
-| CPU（错误版本） | 0.37 | - | ❌ 有 bug |
-| CPU（正确版本） | 1.0000 | < 1e-6 | ✅ 已修复 |
-| GPU 增量版本 | 1.0000 | < 1e-6 | ✅ 已修复 |
-| GPU 全量版本 | 1.0000 | < 1e-6 | ✅ 已修复 |
+| CPU（正确版本） | 1.0000 | < 1e-6 | ✅ |
+| GPU 增量版本 | 1.0000 | < 1e-6 | ✅ |
+| GPU 全量版本 | 1.0000 | < 1e-6 | ✅ |
 
-### 增量 vs 全量重算（Swift 原型）
+### 增量算法加速比（Rust，5万顶点实测）
+
+| 算法 | 全量 (ms) | 增量 (ms) | 加速比 | 目标 |
+|------|-----------|-----------|--------|:--:|
+| BFS | 1.91 | 0.001 | **1580x** | 80x ✅ |
+| 连通分量 | 7.38 | 0.002 | **4920x** | 74x ✅ |
+| PageRank | 59.85 | 3.17 | **18.9x** | 244x ⚠️ |
+
+### GPU Buffer 缓存复用（Rust）
+
+| 规模 | PageRank | BFS | SSSP |
+|------|:---:|:---:|:---:|
+| 1K/5K | 22% | 21% | 24% |
+| 100K/1M | 25% | 24% | 25% |
+
+### 增量 vs 全量重算（Swift 原型，参考）
 
 | 算法 | 全量时间 (ms) | 增量时间 (ms) | 加速比 |
 |------|--------------|--------------|--------|
@@ -236,10 +250,7 @@ Apple M4 的统一内存架构（CPU/GPU 共享物理地址空间）提供了新
 | 连通分量 | 51.89 | 0.70 | **74x** |
 | 三角形计数 | 12.86 | 0.0265 | **486x** |
 
-**实验环境**：
-- 硬件：Apple M4（10 核 GPU）
-- 图：10 万顶点、50 万边（幂律分布）
-- 变化：添加 10-1000 条边
+**实验环境**：Apple M4（10 核 GPU），幂律分布图
 
 ---
 
@@ -248,29 +259,31 @@ Apple M4 的统一内存架构（CPU/GPU 共享物理地址空间）提供了新
 ### Rust 版本（推荐）
 
 ```bash
-# 克隆仓库
 git clone https://github.com/LittleLollipop/axolotl.git
 cd axolotl/prototype-rust
 
-# 编译
-cargo build --release
+# 运行全部 77 个测试
+cargo test --lib
 
-# 运行 PageRank 测试（验证正确性）
-cargo run --release --example test_pagerank_fix
+# 启动 REST API 服务器（持久化）
+cargo run --example server -- --data data/graph.axeb
 
-# 预期输出：
-# === PageRank 修复测试 ===
-# 
-# 数据集：1000 顶点，5000 边
-# 阻尼因子：0.85
-# 迭代次数：20
-# 
-# 结果：
-#   CPU PR 值之和 = 1.0000
-#   GPU 增量 PR 值之和 = 1.0000
-#   GPU 全量 PR 值之和 = 1.0000
-# 
-# ✅ 所有实现都产生正确的 PR 值之和 (1.0)
+# 另开终端：
+curl http://localhost:8080/health
+# → {"status":"ok","name":"Axolotl GraphDB"}
+
+# 添加顶点
+curl -X POST http://localhost:8080/vertices \
+  -H "Content-Type: application/json" \
+  -d '{"id":42,"properties":{"name":"测试"}}'
+
+# 运行 PageRank
+curl -X POST http://localhost:8080/algorithms/pagerank \
+  -H "Content-Type: application/json" \
+  -d '{"iterations":50}'
+
+# 保存并退出
+curl -X POST http://localhost:8080/admin/shutdown
 ```
 
 ### Swift 版本（参考）
@@ -368,24 +381,16 @@ kernel void pagerank_edgeblock_optimized(
 
 ## 技术文档
 
-详细的设计决策、基准测试结果和分析，请参阅：
+详见：
 
-- **项目原则**：[`core-research/algorithm-research/PROJECT_PRINCIPLES.md`](core-research/algorithm-research/PROJECT_PRINCIPLES.md)
-  - 设计原则和哲学决策
-  - 为什么我们选择某些方法
-  
-- **增量 PageRank 状态**：[`core-research/experiment-reports/INCREMENTAL_PR_STATUS.md`](core-research/experiment-reports/INCREMENTAL_PR_STATUS.md)
-  - PageRank bug 修复过程
-  - 正确性验证
-  
-- **性能对比**：[`core-research/performance-tests/PERFORMANCE_COMPARISON.md`](core-research/performance-tests/PERFORMANCE_COMPARISON.md)
-  - 基准测试结果
-  - 与 NetworkX 和 Neo4j 的对比
-
-- **Swift 技术报告**：[`prototype-swift/Docs/technical_report.md`](prototype-swift/Docs/technical_report.md)
-  - EdgeBlock 设计和实现
-  - 性能基准测试（BFS、PageRank）
-  - 失败尝试的分析
+- **[Rust 实现指南](prototype-rust/README.md)** — 完整 API 参考、架构、示例
+- **[事务设计](prototype-rust/TRANSACTION_DESIGN.md)** — WAL、MVCC、崩溃恢复设计
+- **[项目原则](core-research/algorithm-research/PROJECT_PRINCIPLES.md)** — 设计哲学
+- **[增量算法性能报告](core-research/experiment-reports/INCREMENTAL_PERF_VERIFICATION.md)** — 实际加速比测量
+- **[EdgeBlock 重构基准](core-research/performance-tests/EDGEBLOCK_REFACTOR_BENCH.md)** — GPU buffer 缓存分析
+- **[增量 PageRank 状态](core-research/experiment-reports/INCREMENTAL_PR_STATUS.md)** — 正确性修复记录
+- **[性能对比](core-research/performance-tests/PERFORMANCE_COMPARISON.md)** — vs NetworkX, Neo4j
+- **[Swift 技术报告](prototype-swift/Docs/technical_report.md)** — 原始 EdgeBlock 设计
 
 ---
 
@@ -393,22 +398,27 @@ kernel void pagerank_edgeblock_optimized(
 
 ### 短期（1-2 个月）
 
-- [ ] **性能对比**：Axolotl vs NetworkX vs Neo4j（端到端）
-- [ ] **增量 BFS**：应用 CPU+GPU 协同到 BFS（Rust）
-- [ ] **增量 SSSP**：单源最短路径的增量更新（Rust）
-- [ ] **完成 PageRank**：增量和全量版本（GPU）
+- [x] ~~性能对比：Axolotl vs NetworkX vs Neo4j~~ → [见基准](core-research/experiment-reports/INCREMENTAL_PERF_VERIFICATION.md)
+- [x] ~~增量 BFS：CPU+GPU 协同（Rust）~~
+- [x] ~~增量 SSSP：单源最短路径（Rust）~~
+- [x] ~~PageRank：增量和全量版本（GPU）~~
+- [x] ~~更多算法：连通分量、三角形计数~~
+- [x] ~~持久化：二进制图格式~~
+- [x] ~~简单查询接口：邻居、路径、排名~~
+- [x] ~~REST API 服务器~~
+- [ ] **Python 绑定**：PyO3 集成，用于数据科学工作流
+- [ ] **增量 PageRank 性能优化**：GPU kernel 调用路径改进
 
 ### 中期（3-6 个月）
 
-- [ ] **更多算法**：连通分量、三角形计数、社区检测
-- [ ] **更大的图**：在 1M+ 顶点图上测试
+- [ ] **更大的图**：在 10M+ 顶点图上测试
 - [ ] **内存优化**：减少大图的内存占用
 - [ ] **多 GPU 支持**：利用多个 GPU 核心（M4 有 10 个 GPU 核心）
+- [ ] **查询 DSL**：扩展遍历/模式匹配支持
 
 ### 长期（6-12 个月）
 
-- [ ] **简单查询接口**：基本的图查询（邻居、路径、排名）
-- [ ] **持久化**：二进制图格式，用于高效存储/加载
+- [ ] **分布式支持**：多机图分片/复制
 - [ ] **移植到其他架构**：Intel Arc、NVIDIA Grace（统一内存）
 - [ ] **学术论文**：提交到会议（SIGMOD, VLDB, SC）
 

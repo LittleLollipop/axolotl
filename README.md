@@ -21,23 +21,37 @@ Axolotl is a research project exploring graph algorithm optimizations for unifie
 
 ## Rust Implementation
 
-The Rust implementation is the current development version, providing:
+The Rust implementation is the **current development version**, providing:
 
+- ✅ **EdgeBlock Native Storage**: Unified memory format with CRUD, binary persistence (AXEB), mmap support
+- ✅ **REST API Server**: Full CRUD + algorithms + traversal + management endpoints (16-thread pool)
+- ✅ **Crash Recovery**: WAL replay on startup, automatic after unclean shutdown
+- ✅ **Workload Persistence**: Start from file + auto-save on shutdown
+- ✅ **Edge Properties**: Weight + custom properties per edge, stored alongside topology
+- ✅ **Graph Traversal**: `walk()`, `subgraph()`, `find_paths()` with property filtering
 - ✅ **Correct PageRank**: Handles dangling nodes (PR sum = 1.0)
 - ✅ **GPU Acceleration**: Metal kernels for PageRank, BFS, SSSP
-- ✅ **Incremental Algorithms**: Only update affected vertices
-- ✅ **EdgeBlock Data Structure**: Optimized for GPU memory access
+- ✅ **Incremental Algorithms**: Only update affected vertices (5 algorithms, 77 tests)
 
 **Quick Start**:
 ```bash
 cd prototype-rust
-cargo build --release
-cargo run --release --example test_pagerank_fix
+
+# Run all tests
+cargo test --lib                     # 77 passed
+
+# Start REST API server
+cargo run --example server -- --data data/graph.axeb
+# Server at http://localhost:8080
+
+# Run benchmarks
+cargo run --release --example bench_incremental
 ```
 
 **Documentation**: 
 - [Rust Implementation Guide](prototype-rust/README.md)
-- [Rust API Documentation](core-research/docs/RUST_IMPLEMENTATION.md)
+- [Incremental Performance Report](core-research/experiment-reports/INCREMENTAL_PERF_VERIFICATION.md)
+- [EdgeBlock Refactoring Benchmark](core-research/performance-tests/EDGEBLOCK_REFACTOR_BENCH.md)
 
 ---
 
@@ -169,12 +183,26 @@ PR(v) = (1-d)/N + d × Σ PR(u) / out_degree(u)
 
 | Implementation | PR Sum | Max Error | Status |
 |----------------|--------|-----------|--------|
-| CPU (incorrect) | 0.37 | - | ❌ Bug |
-| CPU (correct) | 1.0000 | < 1e-6 | ✅ Fixed |
-| GPU Incremental | 1.0000 | < 1e-6 | ✅ Fixed |
-| GPU Full | 1.0000 | < 1e-6 | ✅ Fixed |
+| CPU (correct) | 1.0000 | < 1e-6 | ✅ |
+| GPU Incremental | 1.0000 | < 1e-6 | ✅ |
+| GPU Full | 1.0000 | < 1e-6 | ✅ |
 
-### Incremental vs Full Recomputation (Swift Prototype)
+### Incremental Algorithm Speedup (Rust, 50K vertices)
+
+| Algorithm | Full (ms) | Incremental (ms) | Speedup | Target |
+|-----------|-----------|-------------------|---------|:------:|
+| BFS | 1.91 | 0.001 | **1580x** | 80x ✅ |
+| Connected Components | 7.38 | 0.002 | **4920x** | 74x ✅ |
+| PageRank | 59.85 | 3.17 | **18.9x** | 244x ⚠️ |
+
+### GPU Buffer Cache Reuse (Rust)
+
+| Scale | PageRank | BFS | SSSP |
+|-------|:---:|:---:|:---:|
+| 1K/5K | 22% | 21% | 24% |
+| 100K/1M | 25% | 24% | 25% |
+
+### Incremental vs Full Recomputation (Swift Prototype, Reference)
 
 | Algorithm | Full Time (ms) | Incremental Time (ms) | Speedup |
 |-----------|-----------------|----------------------|---------|
@@ -184,10 +212,7 @@ PR(v) = (1-d)/N + d × Σ PR(u) / out_degree(u)
 | Connected Components | 51.89 | 0.70 | **74x** |
 | Triangle Counting | 12.86 | 0.0265 | **486x** |
 
-**Experiment setup**:
-- Hardware: Apple M4 (10-core GPU)
-- Graph: 100K vertices, 500K edges (power-law)
-- Change: Add 10-1000 edges
+**Experiment setup**: Apple M4 (10-core GPU), power-law graphs
 
 ---
 
@@ -196,29 +221,34 @@ PR(v) = (1-d)/N + d × Σ PR(u) / out_degree(u)
 ### Rust Version (Recommended)
 
 ```bash
-# Clone repository
 git clone https://github.com/LittleLollipop/axolotl.git
 cd axolotl/prototype-rust
 
-# Build
-cargo build --release
+# Run all 77 tests
+cargo test --lib
 
-# Run PageRank test (verify correctness)
-cargo run --release --example test_pagerank_fix
+# Start REST API server (with persistence)
+cargo run --example server -- --data data/graph.axeb
 
-# Expected output:
-# === PageRank Fix Test ===
-# 
-# Dataset: 1000 vertices, 5000 edges
-# Damping factor: 0.85
-# Iterations: 20
-# 
-# Results:
-#   CPU PR sum = 1.0000
-#   GPU Incremental PR sum = 1.0000
-#   GPU Full PR sum = 1.0000
-# 
-# ✅ All implementations produce correct PR sum (1.0)
+# In another terminal:
+curl http://localhost:8080/health
+# → {"status":"ok","name":"Axolotl GraphDB"}
+
+curl http://localhost:8080/stats
+# → {"vertex_count":2,"edge_count":1,"mode":"in_memory"}
+
+# Add a vertex
+curl -X POST http://localhost:8080/vertices \
+  -H "Content-Type: application/json" \
+  -d '{"id":42,"properties":{"name":"test"}}'
+
+# Run PageRank
+curl -X POST http://localhost:8080/algorithms/pagerank \
+  -H "Content-Type: application/json" \
+  -d '{"iterations":50}'
+
+# Save and shutdown
+curl -X POST http://localhost:8080/admin/shutdown
 ```
 
 ### Swift Version (Reference)
@@ -316,24 +346,14 @@ kernel void pagerank_edgeblock_optimized(
 
 ## Technical Documentation
 
-For detailed design decisions, benchmark results, and analysis, see:
-
-- **Project Principles**: [`core-research/algorithm-research/PROJECT_PRINCIPLES.md`](core-research/algorithm-research/PROJECT_PRINCIPLES.md)
-  - Design principles and philosophical decisions
-  - Why we chose certain approaches
-  
-- **Incremental PageRank Status**: [`core-research/experiment-reports/INCREMENTAL_PR_STATUS.md`](core-research/experiment-reports/INCREMENTAL_PR_STATUS.md)
-  - PageRank bug fix process
-  - Correctness verification
-  
-- **Performance Comparison**: [`core-research/performance-tests/PERFORMANCE_COMPARISON.md`](core-research/performance-tests/PERFORMANCE_COMPARISON.md)
-  - Benchmark results
-  - Comparison with NetworkX and Neo4j
-
-- **Swift Technical Report**: [`prototype-swift/Docs/technical_report.md`](prototype-swift/Docs/technical_report.md)
-  - EdgeBlock design and implementation
-  - Performance benchmarks (BFS, PageRank)
-  - Analysis of failed attempts
+- **[Rust Implementation Guide](prototype-rust/README.md)** — Full API reference, architecture, examples
+- **[Transaction Design](prototype-rust/TRANSACTION_DESIGN.md)** — WAL, MVCC, crash recovery design
+- **[Project Principles](core-research/algorithm-research/PROJECT_PRINCIPLES.md)** — Design philosophy
+- **[Incremental Performance Report](core-research/experiment-reports/INCREMENTAL_PERF_VERIFICATION.md)** — Actual speedup measurements
+- **[EdgeBlock Refactoring Benchmark](core-research/performance-tests/EDGEBLOCK_REFACTOR_BENCH.md)** — GPU buffer cache analysis
+- **[Incremental PageRank Status](core-research/experiment-reports/INCREMENTAL_PR_STATUS.md)** — Correctness fix history
+- **[Performance Comparison](core-research/performance-tests/PERFORMANCE_COMPARISON.md)** — vs NetworkX, Neo4j
+- **[Swift Technical Report](prototype-swift/Docs/technical_report.md)** — Original EdgeBlock design
 
 ---
 
@@ -341,22 +361,27 @@ For detailed design decisions, benchmark results, and analysis, see:
 
 ### Short-term (1-2 months)
 
-- [ ] **Performance comparison**: Axolotl vs NetworkX vs Neo4j (end-to-end)
-- [ ] **Incremental BFS**: Apply CPU+GPU collaboration to BFS (Rust)
-- [ ] **Incremental SSSP**: Single Source Shortest Path incremental update (Rust)
-- [ ] **Complete PageRank**: Both incremental and full versions (GPU)
+- [x] ~~Performance comparison: Axolotl vs NetworkX vs Neo4j~~ → [See benchmark](core-research/experiment-reports/INCREMENTAL_PERF_VERIFICATION.md)
+- [x] ~~Incremental BFS: CPU+GPU collaboration (Rust)~~
+- [x] ~~Incremental SSSP: Single Source Shortest Path (Rust)~~
+- [x] ~~PageRank: Both incremental and full versions (GPU)~~
+- [x] ~~More algorithms: Connected Components, Triangle Counting~~
+- [x] ~~Persistence: Binary graph format~~
+- [x] ~~Simple query interface: neighbors, paths, rankings~~
+- [x] ~~REST API server~~
+- [ ] **Python bindings**: PyO3 integration for data science workflows
+- [ ] **Incremental PageRank performance optimization**: GPU kernel path improvements
 
 ### Medium-term (3-6 months)
 
-- [ ] **More algorithms**: Connected Components, Triangle Counting, Community Detection
-- [ ] **Larger graphs**: Test on 1M+ vertex graphs
+- [ ] **Larger graphs**: Test on 10M+ vertex graphs
 - [ ] **Memory optimization**: Reduce memory footprint for large graphs
 - [ ] **Multi-GPU support**: Utilize multiple GPU cores (M4 has 10 GPU cores)
+- [ ] **Query DSL**: Extended traversal/pattern matching support
 
 ### Long-term (6-12 months)
 
-- [ ] **Simple query interface**: Basic graph queries (neighbors, paths, rankings)
-- [ ] **Persistence**: Binary graph format for efficient storage/loading
+- [ ] **Distributed support**: Sharding/replication for multi-machine graphs
 - [ ] **Port to other architectures**: Intel Arc, NVIDIA Grace (unified memory)
 - [ ] **Academic paper**: Submit to conferences (SIGMOD, VLDB, SC)
 
