@@ -1,6 +1,6 @@
 # EdgeBlock: A Fixed-Size Block Graph Format for Incremental Algorithms on Unified Memory
 
-**Authors**: Lu Yan (闫路)
+**Authors**: Lu Yan (闫路) Kaizhuo Chen (陈楷卓)
 
 **Date**: July 7, 2026
 
