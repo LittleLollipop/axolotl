@@ -53,6 +53,9 @@ pub struct GraphDB {
 
     // ---- Mmap 模式 ----
     mmap: Option<MmapGraph>,
+
+    /// 持久化文件路径（用于 autosave）
+    data_file: Option<String>,
 }
 
 impl GraphDB {
@@ -65,6 +68,7 @@ impl GraphDB {
                 mode,
                 edgeblock: Some(GPUEdgeBlockGraph::new()),
                 mmap: None,
+                data_file: None,
             },
             GraphMode::Mmap => {
                 panic!("Use GraphDB::open() for Mmap mode with a file path");
@@ -136,6 +140,7 @@ impl GraphDB {
                     mode,
                     edgeblock: Some(eb),
                     mmap: None,
+                    data_file: None,
                 })
             }
             GraphMode::Mmap => {
@@ -157,9 +162,38 @@ impl GraphDB {
                     mode,
                     edgeblock: None,
                     mmap: Some(mmap_g),
+                    data_file: None,
                 })
             }
         }
+    }
+
+    /// 从文件加载，不存在则创建空库（自动 WAL 恢复）
+    pub fn from_file_or_new(file_path: &str) -> Result<Self, GraphDBError> {
+        if std::path::Path::new(file_path).exists() {
+            let mut db = Self::open(file_path, GraphMode::InMemory)?;
+            db.data_file = Some(file_path.to_string());
+            return Ok(db);
+        }
+        Ok(GraphDB {
+            mode: GraphMode::InMemory,
+            edgeblock: Some(GPUEdgeBlockGraph::new()),
+            mmap: None,
+            data_file: Some(file_path.to_string()),
+        })
+    }
+
+    /// 保存到绑定的文件路径（如果有）
+    pub fn save_to_file(&self) -> Result<(), GraphDBError> {
+        match &self.data_file {
+            Some(path) => self.save_to(path),
+            None => Err(GraphDBError::Io("no data file path set".to_string())),
+        }
+    }
+
+    /// 获取当前数据文件路径
+    pub fn file_path(&self) -> Option<&str> {
+        self.data_file.as_deref()
     }
 
     /// 创建内存模式数据库（可指定文件路径用于保存）
@@ -168,6 +202,7 @@ impl GraphDB {
             mode: GraphMode::InMemory,
             edgeblock: Some(GPUEdgeBlockGraph::new()),
             mmap: None,
+            data_file: None,
         })
     }
 

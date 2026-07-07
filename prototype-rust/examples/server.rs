@@ -1,34 +1,35 @@
 // examples/server.rs
 // Axolotl GraphDB REST API 服务器启动入口
+//
+// 用法: cargo run --example server [-- --data ./my-graph.axeb]
+//
+// 启动时自动从文件加载（含 WAL 恢复），不存在则创建空库。
+// 停止时按 Ctrl+D 或发送空行 → 自动保存到文件。
 
 use axolotl_rs::graph_db::{GraphDB, GraphMode};
-use axolotl_rs::PropertyValue;
-use std::collections::HashMap;
 
 fn main() {
-    println!("Initializing Axolotl GraphDB...");
+    let args: Vec<String> = std::env::args().collect();
+    let data_file = if args.len() > 2 && args[1] == "--data" {
+        args[2].clone()
+    } else {
+        "data/graph.axeb".to_string()
+    };
 
-    let mut db = GraphDB::new(GraphMode::InMemory);
+    // 确保数据目录存在
+    std::fs::create_dir_all(
+        std::path::Path::new(&data_file).parent().unwrap_or(std::path::Path::new("."))
+    ).ok();
 
-    // 示例数据
-    let mut alice = HashMap::new();
-    alice.insert("name".to_string(), PropertyValue::String("Alice".to_string()));
-    alice.insert("age".to_string(), PropertyValue::Int(30));
-    db.add_vertex(1, alice).unwrap();
+    println!("Axolotl GraphDB Server");
+    println!("  Data file: {}", data_file);
 
-    let mut bob = HashMap::new();
-    bob.insert("name".to_string(), PropertyValue::String("Bob".to_string()));
-    bob.insert("age".to_string(), PropertyValue::Int(28));
-    db.add_vertex(2, bob).unwrap();
+    let db = GraphDB::from_file_or_new(&data_file).expect("Failed to initialize database");
 
-    let mut charlie = HashMap::new();
-    charlie.insert("name".to_string(), PropertyValue::String("Charlie".to_string()));
-    db.add_vertex(3, charlie).unwrap();
+    println!("  Vertices: {}, Edges: {}", db.vertex_count(), db.edge_count());
+    println!("  POST /admin/save     手动保存");
+    println!("  POST /admin/shutdown  安全关闭（自动保存后退出）");
+    println!();
 
-    db.add_edge(1, 2, 1.0, HashMap::new()).unwrap();
-    db.add_edge(1, 3, 1.0, HashMap::new()).unwrap();
-    db.add_edge(2, 3, 1.0, HashMap::new()).unwrap();
-
-    println!("Loaded {} vertices, {} edges", db.vertex_count(), db.edge_count());
     axolotl_rs::server::serve("0.0.0.0:8080", db);
 }

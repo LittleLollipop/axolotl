@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use crate::graph_db::{GraphDB, GraphMode};
@@ -57,6 +58,9 @@ impl ThreadPool {
 // ── 共享状态 ─────────────────────────
 
 pub type SharedGraph = Arc<RwLock<GraphDB>>;
+
+/// 全局 shutdown 标志
+static SHUTDOWN_FLAG: AtomicBool = AtomicBool::new(false);
 
 // ── HTTP 框架（微型）────────────────────
 
@@ -150,6 +154,9 @@ fn handle_request(req: Request, state: &SharedGraph) -> (u16, String) {
         ("POST", ["traverse", "walk"]) => handle_walk(&req.body, state),
         ("POST", ["traverse", "subgraph"]) => handle_subgraph(&req.body, state),
         ("POST", ["traverse", "find_paths"]) => handle_find_paths(&req.body, state),
+
+        ("POST", ["admin", "save"]) => handle_admin_save(state),
+        ("POST", ["admin", "shutdown"]) => handle_admin_shutdown(state),
 
         _ => (404, json_err("not found")),
     }
@@ -432,6 +439,27 @@ fn handle_find_paths(body: &[u8], state: &SharedGraph) -> (u16, String) {
     }).to_string())
 }
 
+// ── 管理端点 ─────────────────────────
+
+fn handle_admin_save(state: &SharedGraph) -> (u16, String) {
+    let path = state.read().unwrap().file_path().map(|s| s.to_string());
+    match path {
+        Some(p) => {
+            match state.read().unwrap().save_to_file() {
+                Ok(()) => (200, serde_json::json!({ "status": "saved", "path": p }).to_string()),
+                Err(e) => (500, serde_json::json!({ "error": format!("{:?}", e) }).to_string()),
+            }
+        }
+        None => (400, json_err("no data file path configured")),
+    }
+}
+
+fn handle_admin_shutdown(state: &SharedGraph) -> (u16, String) {
+    let path = state.read().unwrap().file_path().map(|s| s.to_string());
+    SHUTDOWN_FLAG.store(true, Ordering::Relaxed);
+    (200, serde_json::json!({ "status": "shutting_down", "path": path }).to_string())
+}
+
 // ── PropertyValue 转换 ─────────────────────────
 
 fn json_to_property(val: &serde_json::Value) -> PropertyValue {
@@ -476,13 +504,27 @@ pub fn serve(addr: &str, graph: GraphDB) {
     println!("   GET  /neighbors/:id/in");
     println!("   POST /algorithms/pagerank {{\"iterations\": 100}}");
     println!("   POST /algorithms/bfs      {{\"source\": 0}}");
+    println!("   POST /admin/save     手动保存");
+    println!("   POST /admin/shutdown  安全关闭（自动保存）");
     println!();
 
+    SHUTDOWN_FLAG.store(false, Ordering::Relaxed);
     let pool = ThreadPool::new(POOL_SIZE);
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
+    listener.set_nonblocking(true).ok();
+
+    loop {
+        if SHUTDOWN_FLAG.load(Ordering::Relaxed) {
+            // 最后一次保存
+            let g = state.read().unwrap();
+            match g.save_to_file() {
+                Ok(()) => println!("[shutdown] Saved."),
+                Err(e) => eprintln!("[shutdown] Save failed: {:?}", e),
+            }
+            break;
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
                 let state = state.clone();
                 pool.execute(move || {
                     let req = match parse_request(&mut stream) {
@@ -492,11 +534,18 @@ pub fn serve(addr: &str, graph: GraphDB) {
                             return;
                         }
                     };
+                    if SHUTDOWN_FLAG.load(Ordering::Relaxed) { return; }
                     let (status, body) = handle_request(req, &state);
                     respond(&mut stream, status, "application/json", &body);
                 });
             }
-            Err(e) => eprintln!("Connection error: {}", e),
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(std::time::Duration::from_millis(100));
+                continue;
+            }
+            Err(e) => eprintln!("Accept error: {}", e),
         }
     }
+
+    println!("[shutdown] Server stopped.");
 }
