@@ -2,7 +2,8 @@
 // Axolotl-RS: 高性能图数据库库
 
 #![allow(ambiguous_glob_reexports)]
-#![allow(deprecated)] // pyo3 SIGNATURE deprecated, to be addressed in next release
+// Allow pyo3 SIGNATURE deprecated when python-bindings is enabled
+#[cfg_attr(feature = "python-bindings", allow(deprecated))]
 
 use thiserror::Error;
 
@@ -29,6 +30,7 @@ pub mod incremental_cc; // 增量 Connected Components（使用 Union-Find）
 pub mod incremental_tc; // 增量 Triangle Counting（三角形计数）
 pub mod server; // REST API 网络层
 pub mod recovery; // Crash Recovery（WAL 重放）
+#[cfg(feature = "python-bindings")]
 pub mod py_bindings; // Python bindings (PyO3)
 
 // GPU 模块（仅在 macOS 上编译）

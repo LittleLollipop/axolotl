@@ -44,7 +44,11 @@ dispatch = "0.2"
 memmap2 = "0.9"
 
 # Python 绑定
-pyo3 = { version = "0.23", features = ["extension-module"] }
+pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
+
+[features]
+default = []
+python-bindings = ["pyo3"]
 
 [dev-dependencies]
 # 基准测试
