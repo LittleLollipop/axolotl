@@ -192,8 +192,6 @@ PR(v) = (1-d)/N + d × Σ PR(u) / out_degree(u)
 |-----------|-----------|-------------------|---------|
 | BFS | 1.91 | 0.001 | **1580x** |
 | Connected Components | 7.38 | 0.002 | **4920x** |
-| BFS | 1.91 | 0.001 | **1580x** |
-| Connected Components | 7.38 | 0.002 | **4920x** |
 | PageRank | 59.85 | 3.17 | **18.9x** |
 
 > **Reference (CPU-only)**: SSSP uses differential BFS achieving 197x (4.18ms → 0.021ms). Triangle Counting achieves 2.0x (48.95ms → 24.45ms). Both are CPU implementations without GPU acceleration, included as reference data points.
