@@ -1,5 +1,14 @@
 # Axolotl-RS 性能对比分析
 
+> **⚠️ 历史文档 — 最后更新 2026-07-05**
+> 
+> 本文档中的"长期优化"条目在 v0.1.0-beta 中已大幅推进：
+> - Python 绑定 ✅ 已完成（PyO3 + maturin，pip 可安装）
+> - REST API ✅ 已实现（16 端点，std-only HTTP）
+> - 磁盘持久化 ✅ 已实现（AXEB 格式，非 LMDB/RocksDB）
+> - 查询语言仍为未来方向
+> - 当前功能清单请参考 [根 README](../../README.md)
+
 ## 1. 算法实现对比
 
 | 算法 | Axolotl-RS | igraph (C++) | NetworkX (Python) | Neo4j |

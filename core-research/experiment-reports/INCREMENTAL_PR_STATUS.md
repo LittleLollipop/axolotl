@@ -1,5 +1,13 @@
 # 增量 PageRank 实现状态
 
+> **⚠️ 历史记录 — 最后更新 2026-07-05**
+> 
+> 本文档记录增量 PageRank 的早期开发状态。自 v0.1.0-beta 以来：
+> - GPU 加速（Metal）已实现，`src/gpu/mod.rs` 包含完整 GPU 模块
+> - CPU+GPU 协同增量 PageRank 已完成，实测加速比 18.9x（50K 顶点）
+> - 文中的 "224x 目标" 来自 Swift 原型，不可与 Rust 实测直接比较
+> - 当前状态请参考 [根 README](../../README.md) 和 [性能验证报告](INCREMENTAL_PERF_VERIFICATION.md)
+
 ## 当前状态（2026-07-05）
 
 ### ✅ 已修复的问题

@@ -1,5 +1,9 @@
 # Axolotl EdgeBlock 统一内存重构：性能对比报告
 
+> **📋 历史文档 — 数据有效，但平台定位已扩展**
+> 
+> 本文档的性能数据为 Rust 实测，仍然有效。自 v0.1.0-beta 起，项目定位已从"Apple M4 统一内存"扩展为通用统一内存架构（含 Intel Lunar Lake、NVIDIA Grace 等）。
+
 **日期**：2026-07-07  
 **硬件**：Apple M4 统一内存  
 **对比**：旧架构（PersistentGraph HashMap + CSR 转换）vs 新架构（GPUEdgeBlockGraph 原生格式）  

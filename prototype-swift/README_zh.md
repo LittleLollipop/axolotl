@@ -1,5 +1,9 @@
 # Axolotl
 
+> **📦 Swift 原型 — 历史参考实现**
+> 
+> 该 Swift 实现为项目早期原型，现已作为参考保留。当前活跃开发在 Rust 版本（`prototype-rust/`）中，v0.1.0-beta 已于 2026-07-07 发布。请以 [根目录 README](../README.md) 为权威文档。
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%2014+-lightgrey.svg)]()

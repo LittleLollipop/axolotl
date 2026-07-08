@@ -1,6 +1,10 @@
 # 统一内存架构下的图数据库设计：EdgeBlock 数据结构与 Heterogeneous 图算法
 
-**作者**：AI 助手  
+> **📦 Swift 原型 — 历史参考实现**
+> 
+> 该 Swift 实现为项目早期原型，现已作为参考保留。当前活跃开发在 Rust 版本（`prototype-rust/`）中，v0.1.0-beta 已于 2026-07-07 发布。请以 [根目录 README](../README.md) 为权威文档。
+
+**作者**：Swift 原型 — 历史参考实现  
 **日期**：2026-07-03  
 **硬件**：Apple M4 (Unified Memory)
 
@@ -1162,13 +1166,13 @@ GPU: 异步处理 batch（256 个顶点）
 
 **运行 BFS 测试**：
 ```bash
-cd /Users/sai/WorkBuddy/点子/graph-database
+cd prototype-swift/Experiments
 swift edgeblock_vs_csr.swift
 ```
 
 **运行 PageRank 测试**：
 ```bash
-cd /Users/sai/WorkBuddy/点子/graph-database
+cd prototype-swift/Experiments
 swift pagerank.swift
 ```
 

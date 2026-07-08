@@ -1,5 +1,9 @@
 # Axolotl 性能对比报告（最新版）
 
+> **📋 历史文档 — 最后更新 2026-07-05**
+> 
+> 数据仍有效。v0.1.0-beta 已发布，新增 Python 绑定和 REST API。
+
 ## 测试环境
 
 - **CPU**: Apple M 系列
@@ -123,5 +127,5 @@
 ---
 
 **测试时间:** 2026-07-05
-**测试者:** AI Assistant
+**测试者:** Lu Yan
 **代码位置:** `prototype-rust/examples/performance_comparison.rs`

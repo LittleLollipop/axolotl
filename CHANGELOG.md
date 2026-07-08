@@ -84,7 +84,7 @@ First public release of Axolotl-RS, the Rust implementation of the Axolotl high-
 
 - Mmap mode is read-only (write operations return `NotSupported`)
 - Index API is stubbed (not yet implemented with EdgeBlock)
-- Incremental PageRank GPU path needs optimization (18.9x vs 244x target)
+- Incremental PageRank GPU path currently achieves 18.9x speedup on 50K vertices; further optimization planned
 - 11 dead_code warnings (ported Swift code, cosmetic)
 - No CI/CD pipeline yet
 

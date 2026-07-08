@@ -1,5 +1,17 @@
 # Rust 实现文档
 
+> **⚠️ 历史文档 — 模块列表不完整**
+> 
+> 本文档编写于开发早期，v0.1.0-beta 发布后已新增以下主要模块：
+> - `server.rs` — REST API 服务器
+> - `graph_db.rs` — 统一图数据库接口
+> - `recovery.rs` — WAL 崩溃恢复
+> - `transaction.rs` + `mvcc.rs` — 事务与快照隔离
+> - `mmap_graph.rs` — 内存映射图
+> - `py_bindings.rs` — Python 绑定
+> 
+> 完整状态和最新 API 请参考 [根 README](../../README.md)。
+
 ## 概述
 
 这是 Axolotl 项目的 Rust 实现，提供高性能图算法和 GPU 加速。
