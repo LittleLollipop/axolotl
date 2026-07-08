@@ -167,13 +167,13 @@ Section 3 — Edge Properties:
 
 ### 增量算法加速比（Rust 实际测量）
 
-| 算法 | 目标 | 1K | 10K | 50K | 状态 |
-|------|:---:|:---:|:---:|:---:|:---:|
-| PageRank | 244x | 0.1x | 7.5x | 18.9x | ⚠️ GPU 开销 |
-| BFS | 80x | 31x | **283x** | **1580x** | ✅ 远超 |
-| CC | 74x | 88x | **720x** | **4920x** | ✅ 远超 |
-| SSSP | — | 75x | **423x** | **197x** | ✅ 差分 BFS |
-| Triangle Counting | — | 2.1x | 2.0x | **1.9x** | — |
+| 算法 | 1K | 10K | 50K | 加速类型 |
+|------|:---:|:---:|:---:|:---:|
+| PageRank | 0.1x | 7.5x | 18.9x | CPU+GPU |
+| BFS | 31x | **283x** | **1580x** | CPU+GPU |
+| Connected Components | 88x | **720x** | **4920x** | CPU+GPU |
+
+> **参考数据（纯 CPU）**：SSSP（差分 BFS）加速比 75x/423x/197x。Triangle Counting 加速比 2.1x/2.0x/1.9x。两者均不涉及 GPU 加速。
 
 详见：[增量算法性能验证报告](core-research/experiment-reports/INCREMENTAL_PERF_VERIFICATION.md)
 

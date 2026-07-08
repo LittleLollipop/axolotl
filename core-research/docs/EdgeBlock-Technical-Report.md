@@ -344,8 +344,8 @@ We measure speedup as `full_recomputation_time / incremental_update_time` when a
 | **BFS** | 31× | **283×** | **1580×** |
 | **Connected Components** | 88× | **720×** | **4920×** |
 | **PageRank** | 0.1× | 7.5× | 18.9× |
-| **SSSP** | 75× | **423×** | **197×** |
-| **Triangle Counting** | 2.1× | 2.1× | 2.0× |
+
+**Reference — CPU-only**: SSSP (differential BFS): 75×, 423×, 197×. Triangle Counting: 2.1×, 2.1×, 2.0×. Both are CPU implementations included for reference.
 
 BFS, CC, and SSSP show extreme speedups because the change propagation is highly localized—adding 50 edges affects only a small neighborhood. PageRank shows more modest speedup because even a single edge change creates a global effect that requires propagation through all vertices, making incremental updates comparable to full recomputation for dense graphs.
 

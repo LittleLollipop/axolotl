@@ -10,7 +10,7 @@
 
 🧱 **EdgeBlock**：统一内存时代的新型数据结构——兼顾 GPU warp 合并访问与 CPU 可变性  
 🚀 **CPU+GPU 协同**：CPU 调度，GPU 计算——同一份数据，零拷贝  
-⚡ **增量算法**：BFS **1580×**，连通分量 **4920×**，SSSP **197×**（相对于全量重算）  
+⚡ **增量算法**：BFS **1580×**，连通分量 **4920×**（CPU+GPU 协同，相对于全量重算）  
 🔬 **正确性优先**：PageRank PR 和 = 1.0，77 个单元测试验证  
 
 📖 **[English Documentation](README.md)** | 📄 **[技术报告 (arXiv 预备稿)](docs/EdgeBlock-Technical-Report.md)**
@@ -230,10 +230,10 @@ Apple M4 的统一内存架构（CPU/GPU 共享物理地址空间）提供了新
 | BFS | 1.91 | 0.001 | **1580x** |
 | 连通分量 | 7.38 | 0.002 | **4920x** |
 | PageRank | 59.85 | 3.17 | **18.9x** |
-| SSSP | 4.18 | 0.021 | **197x** |
-| 三角形计数 | 48.95 | 24.45 | **2.0x** |
 
-> **说明**：加速比反映最佳场景（50/50,000 顶点受影响），为性能上限。三角形计数使用 10 条新增边。SSSP 使用差分 BFS（CPU）。详见[技术报告](core-research/docs/EdgeBlock-Technical-Report.md)。
+> **参考数据（纯 CPU）**：SSSP 使用差分 BFS，加速比 197x（4.18ms → 0.021ms）。三角形计数加速比 2.0x（48.95ms → 24.45ms）。两者均为 CPU 实现，不涉及 GPU 加速，仅作为参考数据。
+>
+> 加速比反映最佳场景（50/50,000 顶点受影响），为性能上限。三角形计数使用 10 条新增边。详见[技术报告](core-research/docs/EdgeBlock-Technical-Report.md)。
 
 ### GPU Buffer 缓存复用（Rust）
 
