@@ -172,6 +172,8 @@ Section 3 — Edge Properties:
 | PageRank | 244x | 0.1x | 7.5x | 18.9x | ⚠️ GPU 开销 |
 | BFS | 80x | 31x | **283x** | **1580x** | ✅ 远超 |
 | CC | 74x | 88x | **720x** | **4920x** | ✅ 远超 |
+| SSSP | — | 75x | **423x** | **197x** | ✅ 差分 BFS |
+| Triangle Counting | — | 2.1x | 2.0x | **1.9x** | — |
 
 详见：[增量算法性能验证报告](core-research/experiment-reports/INCREMENTAL_PERF_VERIFICATION.md)
 

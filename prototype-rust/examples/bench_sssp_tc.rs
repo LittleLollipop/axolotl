@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::time::Instant;
 
 use axolotl_rs::csr_graph::CSRGraph;
-use axolotl_rs::incremental_sssp::IncrementalSSSP;
+use axolotl_rs::incremental_ssspv2::incremental_sssp_diff_bfs;
 use axolotl_rs::incremental_tc::{
     GraphWithAdjacencySets,
     full_triangle_counting,
@@ -45,20 +45,20 @@ fn bench_incremental_sssp(n_v: usize, n_e: usize, n_new: usize) -> (f64, f64) {
     let mut rng = rand::thread_rng();
     let edges = generate_edges(n_v, n_e);
 
-    // 构建 CSR 图
+    // 构建原始图
     let csr = build_csr(&edges, n_v);
 
-    // 全量 BFS 做 SSSP（无权图 = 每条边权重 1.0）
+    // 全量 BFS（无权图 = 每条边权重 1.0）
     let t0 = Instant::now();
     let mut distances = vec![f32::INFINITY; n_v];
     distances[0] = 0.0;
-    use std::collections::VecDeque;
-    let mut queue = VecDeque::new();
-    queue.push_back(0u32);
     let mut adj_out: Vec<Vec<usize>> = vec![Vec::new(); n_v];
     for &(u, v) in &edges {
         adj_out[u as usize].push(v as usize);
     }
+    use std::collections::VecDeque;
+    let mut queue = VecDeque::new();
+    queue.push_back(0u32);
     while let Some(u) = queue.pop_front() {
         for &v in &adj_out[u as usize] {
             if distances[v] == f32::INFINITY {
@@ -69,7 +69,7 @@ fn bench_incremental_sssp(n_v: usize, n_e: usize, n_new: usize) -> (f64, f64) {
     }
     let t_full = t0.elapsed().as_secs_f64();
 
-    // 新增边
+    // 新增边（随机无重复）
     let mut new_edges = Vec::new();
     while new_edges.len() < n_new {
         let u = rng.gen_range(0..n_v as u64);
@@ -78,32 +78,16 @@ fn bench_incremental_sssp(n_v: usize, n_e: usize, n_new: usize) -> (f64, f64) {
             new_edges.push((u, v));
         }
     }
+    let new_edges_u32: Vec<(u32, u32)> = new_edges.iter().map(|&(u,v)| (u as u32, v as u32)).collect();
 
-    // 增量 SSSP（只更新受影响顶点）
-    let inc = match IncrementalSSSP::new() {
-        Ok(inc) => inc,
-        Err(_) => {
-            eprintln!("  [SSSP] GPU 不可用，纯 CPU 增量");
-            // 回退：简单重新 BFS
-            let t_inc = t0.elapsed().as_secs_f64() - t_full;
-            return (t_full * 1000.0, t_inc * 1000.0);
-        }
-    };
-
-    // 构建受影响列表
-    let mut affected: Vec<u32> = Vec::new();
-    for &(u, v) in &new_edges {
-        if !affected.contains(&(u as u32)) { affected.push(u as u32); }
-        if !affected.contains(&(v as u32)) { affected.push(v as u32); }
-    }
-
-    // 构建新 CSR
+    // 构建包含新边的新 CSR
     let mut all_edges = edges.clone();
     all_edges.extend_from_slice(&new_edges);
     let csr_new = build_csr(&all_edges, n_v);
 
+    // 增量 SSSP（差分 BFS）
     let t1 = Instant::now();
-    let _new_distances = inc.compute(&csr_new, &distances, &affected);
+    let _updated = incremental_sssp_diff_bfs(&csr_new, &mut distances, &new_edges_u32);
     let t_inc = t1.elapsed().as_secs_f64();
 
     (t_full * 1000.0, t_inc * 1000.0)
@@ -164,16 +148,15 @@ fn main() {
     ];
 
     // ── SSSP ──
-    println!("## 增量 SSSP\n");
-    println!("| 规模 | 全量 SSSP | 增量 SSSP | 加速比 | 备注 |");
-    println!("|------|-----------|-----------|--------|------|");
+    println!("## 增量 SSSP（差分 BFS）\n");
+    println!("| 规模 | 全量 SSSP | 增量 SSSP | 加速比 |");
+    println!("|------|-----------|-----------|--------|");
 
     for (label, n_v, n_e) in &scales {
         let (full_ms, inc_ms) = bench_incremental_sssp(*n_v, *n_e, 50);
         let speedup = if inc_ms > 0.0 { full_ms / inc_ms } else { f64::INFINITY };
-        let note = if speedup < 1.0 { "GPU 开销 > 计算收益" } else { "" };
-        println!("| {} | {:.2}ms | {:.3}ms | **{:.1}x** | {} |",
-            label, full_ms, inc_ms, speedup, note);
+        println!("| {} | {:.2}ms | {:.3}ms | **{:.1}x** |",
+            label, full_ms, inc_ms, speedup);
     }
 
     println!();

@@ -24,6 +24,7 @@ pub mod gpu_edge_block; // GPU EdgeBlock 格式（扁平化数组，适配 GPU�
 pub mod incremental_pagerank; // CPU/GPU 协同的增量 PageRank
 pub mod incremental_bfs; // CPU/GPU 协同的增量 BFS
 pub mod incremental_sssp; // CPU/GPU 协同的增量 SSSP
+pub mod incremental_ssspv2; // 增量 SSSP v2（差分 BFS，纯 CPU）
 pub mod incremental_sssp_edgeblock; // CPU/GPU 协同的增量 SSSP（使用 EdgeBlock 格式）
 pub mod pagerank_correct; // PageRank CPU 正确实现
 pub mod incremental_cc; // 增量 Connected Components（使用 Union-Find）

@@ -10,7 +10,7 @@
 
 🧱 **EdgeBlock**: A new class of data structure for the unified memory era — balancing GPU warp coalescing with CPU mutability  
 🚀 **CPU+GPU Collaboration**: CPU schedules, GPU computes — on the same data, zero-copy  
-⚡ **Incremental Algorithms**: BFS **1580×**, Connected Components **4920×** over full recomputation  
+⚡ **Incremental Algorithms**: BFS **1580x**, Connected Components **4920x**, SSSP **197x** over full recomputation  
 🔬 **Correctness First**: PageRank PR sum = 1.0, 77 unit tests verified  
 
 📖 **[中文文档](README_zh.md)** | 📄 **[技术报告 (arXiv draft)](core-research/docs/EdgeBlock-Technical-Report.md)**
@@ -193,8 +193,10 @@ PR(v) = (1-d)/N + d × Σ PR(u) / out_degree(u)
 | BFS | 1.91 | 0.001 | **1580x** |
 | Connected Components | 7.38 | 0.002 | **4920x** |
 | PageRank | 59.85 | 3.17 | **18.9x** |
+| SSSP | 4.18 | 0.021 | **197x** |
+| Triangle Counting | 48.95 | 24.45 | **2.0x** |
 
-> **Note**: Speedups reflect best-case (50/50,000 vertices affected). These are upper bounds — see [technical report](core-research/docs/EdgeBlock-Technical-Report.md) for details.
+> **Note**: Speedups reflect best-case (50/50,000 vertices affected). Triangle Counting uses 10 new edges. SSSP uses differential BFS (CPU). These are upper bounds — see [technical report](core-research/docs/EdgeBlock-Technical-Report.md) for details.
 
 ### GPU Buffer Cache Reuse (Rust)
 

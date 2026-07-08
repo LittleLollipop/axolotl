@@ -10,7 +10,7 @@
 
 ## Abstract
 
-We present **EdgeBlock**, a graph data structure designed from the ground up for unified memory architectures. EdgeBlock organizes adjacency lists into fixed-size blocks of 32 edges, matching the GPU warp width to achieve coalesced memory access without data transfer overhead between CPU and GPU. We implement five incremental graph algorithms—PageRank, BFS, SSSP, Connected Components, and Triangle Counting—on top of EdgeBlock, following a CPU-GPU collaborative pattern: the CPU identifies affected vertices, the GPU executes parallel computation on those vertices, and the CPU checks for convergence. On an Apple M4 with 10 GPU cores, incremental BFS achieves a **1580×** speedup over full recomputation (50K vertices, 250K edges), and incremental Connected Components achieves **4920×**. The EdgeBlock format reduces data loading time by **61–83%** compared to CSR-based pipelines by eliminating intermediate format conversion. We release the full implementation as open-source Rust library with Python bindings.
+We present **EdgeBlock**, a graph data structure designed from the ground up for unified memory architectures. EdgeBlock organizes adjacency lists into fixed-size blocks of 32 edges, matching the GPU warp width to achieve coalesced memory access without data transfer overhead between CPU and GPU. We implement five incremental graph algorithms—PageRank, BFS, SSSP, Connected Components, and Triangle Counting—on top of EdgeBlock, following a CPU-GPU collaborative pattern: the CPU identifies affected vertices, the GPU executes parallel computation on those vertices, and the CPU checks for convergence. On an Apple M4 with 10 GPU cores, incremental BFS achieves a **1580×** speedup over full recomputation (50K vertices, 250K edges), incremental Connected Components achieves **4920×**, and incremental SSSP achieves **197×** using differential BFS. The EdgeBlock format reduces data loading time by **61–83%** compared to CSR-based pipelines by eliminating intermediate format conversion. We release the full implementation as open-source Rust library with Python bindings.
 
 ---
 
@@ -344,8 +344,10 @@ We measure speedup as `full_recomputation_time / incremental_update_time` when a
 | **BFS** | 31× | **283×** | **1580×** |
 | **Connected Components** | 88× | **720×** | **4920×** |
 | **PageRank** | 0.1× | 7.5× | 18.9× |
+| **SSSP** | 75× | **423×** | **197×** |
+| **Triangle Counting** | 2.1× | 2.1× | 2.0× |
 
-BFS and CC show extreme speedups because the change propagation is highly localized—adding 50 edges affects only a small neighborhood. PageRank shows more modest speedup because even a single edge change creates a global effect that requires propagation through all vertices, making incremental updates comparable to full recomputation for dense graphs.
+BFS, CC, and SSSP show extreme speedups because the change propagation is highly localized—adding 50 edges affects only a small neighborhood. PageRank shows more modest speedup because even a single edge change creates a global effect that requires propagation through all vertices, making incremental updates comparable to full recomputation for dense graphs.
 
 **Note on speedup ratios**: The extreme speedups for BFS (1580×) and CC (4920×) reflect the best-case scenario where only 50 out of 50,000 vertices are directly affected by edge additions. In real-world workloads where a larger fraction of the graph changes, the speedup ratio decreases. These numbers establish an upper bound, not an average-case expectation. All measurements are Rust-vs-Rust (not cross-language comparisons), with both full and incremental algorithms running on the same EdgeBlock graph structure. EdgeBlock's block headers introduce a small overhead (~20%) for full-graph traversals vs. CSR, meaning the full recomputation baseline is slightly slower than an optimal CSR implementation. A CSR-based baseline would yield ~1317× for BFS and ~4100× for CC—still the same order of magnitude. Crucially, CSR cannot support incremental updates without format conversion, so a CSR-vs-CSR incremental comparison is not feasible.
 
