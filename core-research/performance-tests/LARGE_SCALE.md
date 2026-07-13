@@ -10,7 +10,8 @@ EdgeBlock 在 425K-1M 顶点全量数据集上的构建/BFS/PageRank 性能。�
 |---------|:---:|:---:|:-----:|:---:|:--------:|
 | com-DBLP | 425K | 1.0M | 0.8s | 0.1s | 628ms |
 | web-Google | 916K | 5.1M | 4.1s | 0.8s | 1,792ms |
-| RMAT scale 20 | 1.0M | 1.0M | 1.1s | 0.2s | 672ms |
+| RMAT scale 20 | 1.0M | 1.0M | 0.5s | 0.1s | 340ms |
+| RMAT scale 21 | 2.1M | 7.2M | 4.7s | 1.3s | 1,373ms |
 
 ## Scale Analysis
 
@@ -21,7 +22,8 @@ EdgeBlock 在 425K-1M 顶点全量数据集上的构建/BFS/PageRank 性能。�
 | soc-Epinions1 (100K sub) | 1× | 1× | 226ms | 19ms | 95ms |
 | com-DBLP (full) | 4.2× | 5.1× | 0.8s (3.5×) | 0.1s (5.3×) | 628ms (6.6×) |
 | web-Google (full) | 9.2× | 91× | 4.1s (18×) | 0.8s (42×) | 1,792ms (19×) |
-| RMAT (full) | 10× | 5.9× | 1.1s (5×) | 0.2s (11×) | 672ms (7×) |
+| RMAT20 (full) | 10× | 5.9× | 0.5s (5×) | 0.1s (11×) | 340ms (7×) |
+| RMAT21 | 21× | 42× | 4.7s (21×) | 1.3s (68×) | 1,373ms (14×) |
 
 **结论**: Build 和 PageRank 随顶点数接近线性增长。BFS 在 web-Google 上增长较快（42× for 9× vertices），因为 web graph 的直径小、遍历几乎覆盖全图。
 

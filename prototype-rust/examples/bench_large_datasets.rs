@@ -51,7 +51,9 @@ fn main() {
     let datasets = [
         ("com-DBLP (full)", "performance_test/datasets/com_dblp.edgelist"),
         ("web-Google (full)", "performance_test/datasets/web_google.edgelist"),
-        ("RMAT (full)", "performance_test/datasets/rmat_1M.edgelist"),
+        ("RMAT scale 20", "performance_test/datasets/rmat_1M.edgelist"),
+        ("soc-LiveJournal1", "performance_test/datasets/soc_livejournal1.edgelist"),
+        ("RMAT scale 21", "performance_test/datasets/rmat21.edgelist"),
     ];
 
     println!("# EdgeBlock Large-Scale Test\n");
