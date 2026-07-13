@@ -186,28 +186,27 @@ PR(v) = (1-d)/N + d × Σ PR(u) / out_degree(u)
 | GPU Incremental | 1.0000 | < 1e-6 | ✅ |
 | GPU Full | 1.0000 | < 1e-6 | ✅ |
 
-### Incremental Algorithm Speedup (Rust, 50K vertices, +50 edges)
+### Incremental Algorithm Speedup (Rust, +0.1% of vertices as new edges)
 
-| Algorithm | Full (ms) | Incremental (ms) | Speedup |
-|-----------|-----------|-------------------|---------|
-| BFS | 1.91 | 0.001 | **1580x** |
-| Connected Components | 7.38 | 0.002 | **4920x** |
-| PageRank | 59.85 | 3.17 | **18.9x** |
+| Algorithm | 50K Random | soc-Epinions1 (75K) | web-Google (916K) | RMAT scale 21 (2.1M) |
+|-----------|:---:|:---:|:---:|:---:|
+| BFS | **1580x** (+50) | **4690x** (+76) | **131x** (+916) | **8467x** (+2097) |
+| Connected Components | **4920x** (+50) | **569x** (+76) | **721x** (+916) | **720x** (+2097) |
+| PageRank | **18.9x** (+50) | **10.3x** (+76) | **9.9x** (+916) | **9.8x** (+2097) |
 
-> **Reference (CPU-only)**: SSSP uses differential BFS achieving 197x (4.18ms → 0.021ms). Triangle Counting achieves 2.0x (48.95ms → 24.45ms). Both are CPU implementations without GPU acceleration, included as reference data points.
->
-> Speedups reflect best-case (50/50,000 vertices affected). Triangle Counting uses 10 new edges. These are upper bounds — see [technical report](core-research/docs/EdgeBlock-Technical-Report.md) for details.
+> **Scale invariant**: PageRank at ~10x (100→10 iterations). BFS speedup grows with perturbation size. See [comprehensive benchmarks](core-research/performance-tests/LARGE_SCALE.md).
 
-### Standard Graph Datasets (100K vertices, +50 random edges)
+### vs petgraph (Rust library comparison)
 
-| Dataset | V | E | BFS | CC | PageRank | SSSP |
-|---------|:---:|:---:|:---:|:---:|:--------:|:----:|
-| soc-Epinions1 (SNAP) | 76K | 509K | 2x | **7182x** | 8.8x | **427x** |
-| com-DBLP (SNAP) | 100K | 196K | 2x | **2249x** | 8.7x | 67x |
-| web-Google (GAP) | 100K | 56K | 1x | 937x | 10.3x | 95x |
-| RMAT scale 20 | 100K | 170K | 1x | **2074x** | 10.3x | **233x** |
+| Scale | EdgeBlock PageRank | petgraph PageRank | EB Advantage |
+|:---:|:---:|:---:|:---:|
+| 75K | 49ms | 213ms | 4.3x |
+| 100K | 63ms | 98ms | 1.6x |
+| 425K | 319ms | 604ms | 1.9x |
+| 916K | 938ms | 9022ms | 9.6x |
+| 2.1M | 1401ms | 66543ms | **47.5x** |
 
-> **Note**: CC achieves 937x-7182x on real graphs — higher than synthetic benchmarks because real networks have strong community structure, making incremental updates nearly free. Full benchmark details: [Standard Dataset Benchmark](core-research/performance-tests/BENCHMARK_STANDARD_DATASETS.md).
+> EdgeBlock's CSR PageRank advantage compounds with scale. petgraph's per-iteration neighbor traversal overhead dominates at >1M vertices. Full library comparison: [benchmark report](core-research/performance-tests/LARGE_SCALE.md).
 
 ### GPU Buffer Cache Reuse (Rust)
 
