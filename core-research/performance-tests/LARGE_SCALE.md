@@ -1,4 +1,4 @@
-# EdgeBlock Comprehensive Benchmarks
+# axolotl-rs Comprehensive Benchmarks
 
 **Date**: 2026-07-13 | **Hardware**: Apple M4, 16GB unified memory
 
@@ -16,7 +16,7 @@ All benchmarks use proportional edge additions: `+0.1%` of vertex count as new e
 | web-Google (full) | SNAP/GAP | 916,428 | 5,105,039 | Web graph |
 | RMAT scale 21 | Graph500 | 2,097,152 | 7,167,219 | Power-law synthetic |
 
-## Raw Throughput (EdgeBlock Rust Native)
+## Raw Throughput (axolotl-rs Rust Native)
 
 | Dataset | V | E | Build | BFS | PageRank |
 |---------|:---:|:---:|:-----:|:---:|:--------:|
@@ -51,26 +51,26 @@ All benchmarks use proportional edge additions: `+0.1%` of vertex count as new e
 - **PageRank is invariant to graph size and structure** — consistently ~10x across all scales (100 vs 10 iterations).
 - **SSSP (differential BFS) is robust** — 28x-339x, best on graphs with strong community structure where new edges don't propagate far.
 
-## Library Comparison: EdgeBlock vs petgraph
+## Library Comparison: axolotl-rs vs petgraph
 
 | Dataset | V | Library | Build | BFS | PageRank |
 |---------|:---:|---------|:-----:|:---:|:--------:|
-| soc-Epinions1 | 75K | EdgeBlock | 117ms | 9.8ms | **49ms** |
+| soc-Epinions1 | 75K | axolotl-rs | 117ms | 9.8ms | **49ms** |
 | | | petgraph | 3ms | 2.6ms | 213ms |
-| com-DBLP | 100K | EdgeBlock | 38ms | 5.1ms | **63ms** |
+| com-DBLP | 100K | axolotl-rs | 38ms | 5.1ms | **63ms** |
 | | | petgraph | 1ms | 1.7ms | 98ms |
-| web-Google | 100K | EdgeBlock | 15ms | 0.0ms | **41ms** |
+| web-Google | 100K | axolotl-rs | 15ms | 0.0ms | **41ms** |
 | | | petgraph | 0ms | 0.0ms | 54ms |
-| RMAT scale 20 | 99K | EdgeBlock | 37ms | 8.0ms | **31ms** |
+| RMAT scale 20 | 99K | axolotl-rs | 37ms | 8.0ms | **31ms** |
 | | | petgraph | 1ms | 3.1ms | 161ms |
-| com-DBLP (full) | 425K | EdgeBlock | 331ms | 60.4ms | **319ms** |
+| com-DBLP (full) | 425K | axolotl-rs | 331ms | 60.4ms | **319ms** |
 | | | petgraph | 7ms | 13.8ms | 604ms |
-| web-Google (full) | 916K | EdgeBlock | 1984ms | 267ms | **938ms** |
+| web-Google (full) | 916K | axolotl-rs | 1984ms | 267ms | **938ms** |
 | | | petgraph | 42ms | 62ms | 9022ms |
-| RMAT scale 21 | 2.1M | EdgeBlock | 4805ms | 1010ms | **1401ms** |
+| RMAT scale 21 | 2.1M | axolotl-rs | 4805ms | 1010ms | **1401ms** |
 | | | petgraph | 96ms | 723ms | 66543ms |
 
-### EdgeBlock vs petgraph at Scale
+### axolotl-rs vs petgraph at Scale
 
 | Scale | PageRank (EB) | PageRank (PG) | EB Advantage |
 |:---:|:---:|:---:|:---:|
@@ -80,7 +80,7 @@ All benchmarks use proportional edge additions: `+0.1%` of vertex count as new e
 | 916K | 938ms | 9022ms | 9.6x |
 | 2.1M | 1401ms | 66543ms | **47.5x** |
 
-CSR-based PageRank advantage grows super-linearly with scale because petgraph's per-iteration neighbor traversal overhead compounds. At 2.1M vertices, petgraph takes 66 seconds for the same computation EdgeBlock completes in 1.4 seconds.
+CSR-based PageRank advantage grows super-linearly with scale because petgraph's per-iteration neighbor traversal overhead compounds. At 2.1M vertices, petgraph takes 66 seconds for the same computation axolotl-rs completes in 1.4 seconds.
 
 Build remains petgraph's strong suit: 20-50x faster due to zero-overhead graph allocation (no HashMap properties, no bidirectional indexing, no block alignment).
 

@@ -11,7 +11,7 @@
 
 ---
 
-## Raw Throughput (EdgeBlock Rust Native)
+## Raw Throughput (axolotl-rs Rust Native)
 
 | Dataset | V | E | Build | BFS | PageRank |
 |---------|:---:|:---:|:-----:|:---:|:--------:|
@@ -44,26 +44,26 @@
 
 ---
 
-## Library Comparison: EdgeBlock vs petgraph (Rust)
+## Library Comparison: axolotl-rs vs petgraph (Rust)
 
 | Dataset | V | Library | Build | BFS | PageRank |
 |---------|:---:|---------|:-----:|:---:|:--------:|
-| soc-Epinions1 | 75K | EdgeBlock | 117ms | 9.8ms | **49ms** |
+| soc-Epinions1 | 75K | axolotl-rs | 117ms | 9.8ms | **49ms** |
 | | | petgraph | 3ms | 2.6ms | 213ms |
-| com-DBLP | 100K | EdgeBlock | 38ms | 5.1ms | **63ms** |
+| com-DBLP | 100K | axolotl-rs | 38ms | 5.1ms | **63ms** |
 | | | petgraph | 1ms | 1.7ms | 98ms |
-| web-Google | 100K | EdgeBlock | 15ms | 0.0ms | **41ms** |
+| web-Google | 100K | axolotl-rs | 15ms | 0.0ms | **41ms** |
 | | | petgraph | 0ms | 0.0ms | 54ms |
-| RMAT scale 20 | 99K | EdgeBlock | 37ms | 8.0ms | **31ms** |
+| RMAT scale 20 | 99K | axolotl-rs | 37ms | 8.0ms | **31ms** |
 | | | petgraph | 1ms | 3.1ms | 161ms |
-| com-DBLP (full) | 425K | EdgeBlock | 331ms | 60.4ms | **319ms** |
+| com-DBLP (full) | 425K | axolotl-rs | 331ms | 60.4ms | **319ms** |
 | | | petgraph | 7ms | 13.8ms | 604ms |
-| web-Google (full) | 916K | EdgeBlock | 1984ms | 267ms | **938ms** |
+| web-Google (full) | 916K | axolotl-rs | 1984ms | 267ms | **938ms** |
 | | | petgraph | 42ms | 62ms | 9022ms |
-| RMAT scale 21 | 2.1M | EdgeBlock | 4805ms | 1010ms | **1401ms** |
+| RMAT scale 21 | 2.1M | axolotl-rs | 4805ms | 1010ms | **1401ms** |
 | | | petgraph | 96ms | 723ms | 66543ms |
 
-EdgeBlock PageRank vs petgraph advantage:
+axolotl-rs PageRank vs petgraph advantage:
 
 | Scale | EB | petgraph | Ratio |
 |:---:|:---:|:---:|:---:|
@@ -77,7 +77,7 @@ Build: petgraph 20–50x faster (zero-overhead allocation).
 
 ---
 
-## Library Comparison: EdgeBlock vs Networkit vs iGraph (Python APIs)
+## Library Comparison: axolotl-rs vs Networkit vs iGraph (Python APIs)
 
 | Dataset | V | Library | Build | BFS | PageRank |
 |---------|:---:|---------|:-----:|:---:|:--------:|
@@ -88,7 +88,7 @@ Build: petgraph 20–50x faster (zero-overhead allocation).
 | RMAT scale 21 | 2.1M | Networkit (C++) | 888ms | 231ms | **262ms** |
 | | | iGraph (C) | 2328ms | 117ms | 827ms |
 
-**C++ comparison notes**: Networkit's PageRank uses convergence-based early termination (tol=1e-6) rather than fixed 100 iterations. EdgeBlock's PageRank (via Rust CSR) is 1401ms at RMAT21 — 5.3x slower than Networkit but 1.7x slower than iGraph. The gap narrows with scale.
+**C++ comparison notes**: Networkit's PageRank uses convergence-based early termination (tol=1e-6) rather than fixed 100 iterations. axolotl-rs's PageRank (via Rust CSR) is 1401ms at RMAT21 — 5.3x slower than Networkit but 1.7x slower than iGraph. The gap narrows with scale.
 
 ---
 

@@ -1,4 +1,4 @@
-# Library Comparison – EdgeBlock vs NetworkX vs iGraph vs petgraph
+# Library Comparison – axolotl-rs vs NetworkX vs iGraph vs petgraph
 
 **Date**: 2026-07-13 | **Hardware**: Apple M4, 10-core GPU | **Test**: Graph build, BFS, PageRank (100 iterations)
 
@@ -17,7 +17,7 @@
 
 | Library | Lang | Build | BFS | PageRank |
 |---------|:---:|:-----:|:---:|:--------:|
-| EdgeBlock | Rust | 226 | 19.3 | **95** |
+| axolotl-rs | Rust | 226 | 19.3 | **95** |
 | petgraph 0.6 | Rust | 4 | 5.3 | 423 |
 | Vec<Vec> (baseline) | Rust | 6 | 2.1 | — |
 | axolotl_rs bindings | Python | 377 | 22.0 | 12,013 |
@@ -28,7 +28,7 @@
 
 | Library | Lang | Build | BFS | PageRank |
 |---------|:---:|:-----:|:---:|:--------:|
-| EdgeBlock | Rust | 75 | 10.5 | 112 |
+| axolotl-rs | Rust | 75 | 10.5 | 112 |
 | petgraph 0.6 | Rust | 1 | 2.1 | 201 |
 | Vec<Vec> (baseline) | Rust | 3 | 1.4 | — |
 | axolotl_rs bindings | Python | 125 | 13.0 | 1,069 |
@@ -39,7 +39,7 @@
 
 | Library | Lang | Build | BFS | PageRank |
 |---------|:---:|:-----:|:---:|:--------:|
-| EdgeBlock | Rust | 25 | 0.01 | 75 |
+| axolotl-rs | Rust | 25 | 0.01 | 75 |
 | petgraph 0.6 | Rust | 0 | 0.01 | 95 |
 | Vec<Vec> (baseline) | Rust | 1 | 0.01 | — |
 | axolotl_rs bindings | Python | 41 | 0.01 | 437 |
@@ -50,7 +50,7 @@
 
 | Library | Lang | Build | BFS | PageRank |
 |---------|:---:|:-----:|:---:|:--------:|
-| EdgeBlock | Rust | 68 | 15.4 | **58** |
+| axolotl-rs | Rust | 68 | 15.4 | **58** |
 | petgraph 0.6 | Rust | 1 | 5.6 | 325 |
 | Vec<Vec> (baseline) | Rust | 3 | 1.3 | — |
 | axolotl_rs bindings | Python | 99 | 18.0 | 1,965 |
@@ -59,17 +59,17 @@
 
 ## Analysis
 
-### EdgeBlock vs petgraph (Rust native)
+### axolotl-rs vs petgraph (Rust native)
 
-| Metric | EdgeBlock | petgraph | Verdict |
+| Metric | axolotl-rs | petgraph | Verdict |
 |--------|:---:|:---:|------|
 | Build | 4-75× slower | Bare-minimum alloc | EdgeBlock pays for edge property HashMap + EdgeBlock 32-edge alignment + bidirectional indexing |
 | BFS | 1.5-7× slower | ~2× faster | Walk API overhead vs direct neighbor iteration |
 | PageRank | **1.8-5.6× faster** | Reference | CSR format excels at iterative computation — no indirection, cache-friendly sequential reads |
 
-**Bottom line**: EdgeBlock trades build-time overhead for runtime PageRank performance and GPU compatibility. For write-heavy workloads, petgraph wins. For iterative computation, EdgeBlock wins.
+**Bottom line**: axolotl-rs trades build-time overhead for runtime PageRank performance and GPU compatibility. For write-heavy workloads, petgraph wins. For iterative computation, axolotl-rs wins.
 
-### EdgeBlock Rust vs Python bindings
+### axolotl-rs Rust vs Python bindings
 
 The Python bindings add significant overhead:
 
@@ -85,12 +85,12 @@ The PageRank binding performs Python↔Rust serialization on every iteration (10
 
 The bare `Vec<Vec<usize>>` adjacency list represents the theoretical lower bound for graph representation efficiency:
 
-| | Vec<Vec> | EdgeBlock | Overhead |
+| | Vec<Vec> | axolotl-rs | Overhead |
 |------|:---:|:---:|:---:|
 | Build | 6ms | 226ms | 37× |
 | BFS | 2ms | 19ms | 9× |
 
-EdgeBlock's overhead is the price paid for:
+axolotl-rs's overhead is the price paid for:
 - 32-edge block alignment (GPU warp compatibility)
 - Bidirectional edge indexing (forward + reverse)
 - Edge properties (HashMap per edge)
@@ -99,13 +99,13 @@ EdgeBlock's overhead is the price paid for:
 
 ### vs iGraph (C core)
 
-iGraph's C core is the undisputed performance leader across all metrics. Its build time (51ms vs 226ms) and PageRank (72ms vs 95ms) both edge out EdgeBlock, despite being accessed through Python bindings.
+iGraph's C core is the undisputed performance leader across all metrics. Its build time (51ms vs 226ms) and PageRank (72ms vs 95ms) both edge out axolotl-rs, despite being accessed through Python bindings.
 
-EdgeBlock closes the gap on PageRank (95ms vs 72ms = 1.3× slower) thanks to CSR-based computation, but build time remains the primary area for improvement.
+axolotl-rs closes the gap on PageRank (95ms vs 72ms = 1.3× slower) thanks to CSR-based computation, but build time remains the primary area for improvement.
 
 ### NetworkX
 
-NetworkX serves as the Python ecosystem baseline. EdgeBlock's Rust native version is:
+NetworkX serves as the Python ecosystem baseline. axolotl-rs's Rust native version is:
 - Build: **2.1× faster** (226ms vs 469ms)
 - BFS: **11× faster** (19ms vs 213ms)
 - PageRank: **8.1× faster** (95ms vs 766ms)
@@ -117,9 +117,9 @@ Even the Python bindings version beats NetworkX on Build and BFS, but the bindin
 | Rank | Build Speed | BFS Speed | PageRank Speed |
 |:---:|------|------|------|
 | 1 | petgraph | Vec<Vec> (baseline) | iGraph |
-| 2 | Vec<Vec> (baseline) | petgraph | **EdgeBlock** |
+| 2 | Vec<Vec> (baseline) | petgraph | **axolotl-rs** |
 | 3 | iGraph | iGraph | petgraph |
-| 4 | EdgeBlock | EdgeBlock | NetworkX |
+| 4 | axolotl-rs | axolotl-rs | NetworkX |
 | 5 | NetworkX | NetworkX | axolotl_rs (Python) |
 | 6 | axolotl_rs (Python) | axolotl_rs (Python) | — |
 
