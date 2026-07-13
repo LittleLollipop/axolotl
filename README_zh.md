@@ -235,6 +235,17 @@ Apple M4 的统一内存架构（CPU/GPU 共享物理地址空间）提供了新
 >
 > 加速比反映最佳场景（50/50,000 顶点受影响），为性能上限。三角形计数使用 10 条新增边。详见[技术报告](core-research/docs/EdgeBlock-Technical-Report.md)。
 
+### 标准图数据集（100K 顶点，+50 随机边）
+
+| 数据集 | V | E | BFS | CC | PageRank | SSSP |
+|---------|:---:|:---:|:---:|:---:|:--------:|:----:|
+| soc-Epinions1 (SNAP) | 76K | 509K | 2x | **7182x** | 8.8x | **427x** |
+| com-DBLP (SNAP) | 100K | 196K | 2x | **2249x** | 8.7x | 67x |
+| web-Google (GAP) | 100K | 56K | 1x | 937x | 10.3x | 95x |
+| RMAT scale 20 | 100K | 170K | 1x | **2074x** | 10.3x | **233x** |
+
+> **说明**：CC 在真实图上达到 937x-7182x——高于合成基准测试。真实社交/信任网络的强社团结构使增量更新几乎零成本。详细数据：[标准数据集基准测试](core-research/performance-tests/BENCHMARK_STANDARD_DATASETS.md)。
+
 ### GPU Buffer 缓存复用（Rust）
 
 | 规模 | PageRank | BFS | SSSP |

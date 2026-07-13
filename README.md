@@ -198,6 +198,17 @@ PR(v) = (1-d)/N + d × Σ PR(u) / out_degree(u)
 >
 > Speedups reflect best-case (50/50,000 vertices affected). Triangle Counting uses 10 new edges. These are upper bounds — see [technical report](core-research/docs/EdgeBlock-Technical-Report.md) for details.
 
+### Standard Graph Datasets (100K vertices, +50 random edges)
+
+| Dataset | V | E | BFS | CC | PageRank | SSSP |
+|---------|:---:|:---:|:---:|:---:|:--------:|:----:|
+| soc-Epinions1 (SNAP) | 76K | 509K | 2x | **7182x** | 8.8x | **427x** |
+| com-DBLP (SNAP) | 100K | 196K | 2x | **2249x** | 8.7x | 67x |
+| web-Google (GAP) | 100K | 56K | 1x | 937x | 10.3x | 95x |
+| RMAT scale 20 | 100K | 170K | 1x | **2074x** | 10.3x | **233x** |
+
+> **Note**: CC achieves 937x-7182x on real graphs — higher than synthetic benchmarks because real networks have strong community structure, making incremental updates nearly free. Full benchmark details: [Standard Dataset Benchmark](core-research/performance-tests/BENCHMARK_STANDARD_DATASETS.md).
+
 ### GPU Buffer Cache Reuse (Rust)
 
 | Scale | PageRank | BFS | SSSP |
