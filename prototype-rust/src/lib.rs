@@ -38,6 +38,7 @@ pub mod py_bindings; // Python bindings (PyO3)
 #[cfg(target_os = "macos")]
 pub mod gpu; // GPU 加速模块（使用 Metal）
 
+pub mod wave_core; // Wave Core 分解 — CPU/GPU 协同的批量剥皮
 pub use graph::GraphDB; // 旧版本
 pub use algorithms::*;
 pub use persistence::*;
