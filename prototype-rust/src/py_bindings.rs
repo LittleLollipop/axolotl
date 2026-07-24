@@ -149,17 +149,64 @@ impl AxolotlGraph {
     /// pagerank(iterations=100, damping=0.85) → dict[id → score]
     fn pagerank<'py>(&self, py: Python<'py>, iterations: Option<usize>, damping: Option<f64>) -> PyResult<Bound<'py, PyDict>> {
         let iters = iterations.unwrap_or(100);
-        let d = damping.unwrap_or(0.85);
+        let d = damping.unwrap_or(0.85) as f32;
 
-        // Use CSR-based PageRank (O(iters × E), not O(iters × V × E))
         let db = self.db.lock().unwrap();
-        let csr = db.to_csr();
-        let pr_vec = crate::pagerank_correct::compute_pagerank_cpu(&csr, iters);
+        let eb = db.edgeblock().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Graph not in InMemory mode")
+        })?;
 
-        // Map back to vertex IDs
+        let n = eb.vertex_count as usize;
+        let n_f = n as f32;
+
+        // Out-degrees (computed once)
+        let out_degrees: Vec<u32> = eb.compute_out_degrees();
+        let dangling: Vec<usize> = (0..n).filter(|&v| out_degrees[v] == 0).collect();
+
+        // Push-based PageRank: O(E) per iteration via EdgeBlock block scan
+        let mut pr = vec![1.0 / n_f; n];
+        let mut next = vec![0.0f32; n];
+        let block_stride = 34; // BLOCK_SIZE_U32 = 2 (header) + 32 (targets)
+        let blocks = &eb.blocks;
+
+        for _ in 0..iters {
+            // Base teleportation: (1-d)/N to everyone
+            let base = (1.0 - d) / n_f;
+            for v in 0..n { next[v] = base; }
+
+            // Dangling contribution: d * danglingPR / N
+            let dangling_sum: f32 = dangling.iter().map(|&v| pr[v]).sum();
+            let dangling_contrib = d * dangling_sum / n_f;
+
+            // Push: iterate all edges via EdgeBlock blocks
+            let mut block_idx = 0;
+            while block_idx < blocks.len() {
+                let owner_idx = blocks[block_idx] as usize;   // block header: owner
+                let edge_count = blocks[block_idx + 1] as usize; // block header: count
+                if owner_idx < n && edge_count > 0 && out_degrees[owner_idx] > 0 {
+                    let contrib = d * pr[owner_idx] / out_degrees[owner_idx] as f32;
+                    let targets = &blocks[block_idx + 2..block_idx + 2 + edge_count.min(32)];
+                    for &t_raw in targets {
+                        if t_raw as usize >= n { continue; }
+                        next[t_raw as usize] += contrib;
+                    }
+                }
+                block_idx += block_stride;
+            }
+
+            // Apply dangling
+            if !dangling.is_empty() {
+                for v in 0..n { next[v] += dangling_contrib; }
+            }
+
+            std::mem::swap(&mut pr, &mut next);
+        }
+
         let result = PyDict::new(py);
-        for (i, &score) in pr_vec.iter().enumerate() {
-            result.set_item(i as u64, score)?;
+        for (i, &score) in pr.iter().enumerate() {
+            if i < eb.idx_to_id.len() && eb.idx_to_id[i] != u64::MAX {
+                result.set_item(eb.idx_to_id[i], score)?;
+            }
         }
         Ok(result)
     }
