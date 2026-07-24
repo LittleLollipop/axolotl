@@ -149,46 +149,17 @@ impl AxolotlGraph {
     /// pagerank(iterations=100, damping=0.85) → dict[id → score]
     fn pagerank<'py>(&self, py: Python<'py>, iterations: Option<usize>, damping: Option<f64>) -> PyResult<Bound<'py, PyDict>> {
         let iters = iterations.unwrap_or(100);
-        let d = damping.unwrap_or(0.85) as f32;
+        let d = damping.unwrap_or(0.85);
 
+        // Use CSR-based PageRank (O(iters × E), not O(iters × V × E))
         let db = self.db.lock().unwrap();
-        let eb = db.edgeblock().ok_or_else(|| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Graph not in InMemory mode")
-        })?;
+        let csr = db.to_csr();
+        let pr_vec = crate::pagerank_correct::compute_pagerank_cpu(&csr, iters);
 
-        let n = eb.vertex_count as usize;
-        let mut pr = vec![1.0 / n as f32; n];
-
-        // Find dangling vertices (out-degree == 0)
-        let out_degrees: Vec<u32> = eb.compute_out_degrees();
-        let dangling: Vec<usize> = (0..n).filter(|&v| out_degrees[v] == 0).collect();
-
-        for _ in 0..iters {
-            let dangling_sum: f32 = dangling.iter().map(|&v| pr[v]).sum();
-            let dangling_contrib = dangling_sum / n as f32;
-            let mut new_pr = vec![(1.0 - d) / n as f32; n];
-
-            // For each vertex, sum contributions from in-neighbors
-            for v_idx in 0..n {
-                let mut contrib = 0.0f32;
-                for src_id in eb.in_neighbors_by_idx(v_idx) {
-                    if let Some(&src_idx) = eb.id_to_idx.get(&src_id) {
-                        let od = out_degrees[src_idx];
-                        if od > 0 {
-                            contrib += pr[src_idx] / od as f32;
-                        }
-                    }
-                }
-                new_pr[v_idx] += d * (contrib + dangling_contrib);
-            }
-            pr = new_pr;
-        }
-
+        // Map back to vertex IDs
         let result = PyDict::new(py);
-        for (i, &score) in pr.iter().enumerate() {
-            if i < eb.idx_to_id.len() && eb.idx_to_id[i] != u64::MAX {
-                result.set_item(eb.idx_to_id[i], score)?;
-            }
+        for (i, &score) in pr_vec.iter().enumerate() {
+            result.set_item(i as u64, score)?;
         }
         Ok(result)
     }
