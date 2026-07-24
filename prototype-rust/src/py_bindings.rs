@@ -211,6 +211,23 @@ impl AxolotlGraph {
         Ok(result)
     }
 
+    /// Wave Core: CPU/GPU 协同的批量剥皮图密度分层 (K-Core 等价)
+    /// 返回 dict[id → core_number]
+    fn wave_core<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let db = self.db.lock().unwrap();
+        let eb = db.edgeblock().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Graph not in InMemory mode")
+        })?;
+        let core = crate::wave_core::wave_core_blocks(eb);
+        let result = PyDict::new(py);
+        for (i, &c) in core.iter().enumerate() {
+            if i < eb.idx_to_id.len() && eb.idx_to_id[i] != u64::MAX {
+                result.set_item(eb.idx_to_id[i], c)?;
+            }
+        }
+        Ok(result)
+    }
+
     /// bfs(source) → dict[id → distance]
     fn bfs<'py>(&self, py: Python<'py>, source: u64) -> PyResult<Bound<'py, PyDict>> {
         let db = self.db.lock().unwrap();
