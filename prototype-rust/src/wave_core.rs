@@ -27,40 +27,45 @@ pub fn wave_core_blocks(eb: &GPUEdgeBlockGraph) -> Vec<u32> {
     let mut core = vec![0u32; n];
     let mut peeled = vec![false; n];
     let mut peeled_count = 0usize;
+    let mut cursor = 0usize; // lowest non-empty bin tracker
 
     // Wave peeling
     while peeled_count < n {
-        let mut found = false;
-        for current_bin in 0..=max_deg {
-            if bins[current_bin].is_empty() { continue; }
+        while cursor <= max_deg && bins[cursor].is_empty() {
+            cursor += 1;
+        }
+        if cursor > max_deg { break; }
 
-            let batch = std::mem::take(&mut bins[current_bin]);
-            for &v in &batch {
-                if peeled[v] { continue; }
-                core[v] = current_bin as u32;
-                peeled[v] = true;
-                peeled_count += 1;
+        // drain with capacity-preserving swap (no reallocation penalty)
+        let batch = std::mem::take(&mut bins[cursor]);
+        let current_bin = cursor;
+        bins[current_bin] = Vec::with_capacity(batch.len());
 
-                // Propagate: only decrement neighbors with degree > core[v]
-                let first_block = vertices[v] as usize;
-                let num_blocks = block_counts[v] as usize;
-                for b in 0..num_blocks {
-                    let base = (first_block + b) * block_stride;
-                    let ec = blocks[base + 1] as usize;
-                    for j in 0..ec.min(32) {
-                        let nb = blocks[base + 2 + j] as usize;
-                        if nb >= n || peeled[nb] { continue; }
-                        let od = degree[nb] as usize;
-                        if od <= current_bin { continue; }
-                        degree[nb] -= 1;
-                        bins[od - 1].push(nb);
+        for &v in &batch {
+            if peeled[v] { continue; }
+            core[v] = current_bin as u32;
+            peeled[v] = true;
+            peeled_count += 1;
+
+            let first_block = vertices[v] as usize;
+            let num_blocks = block_counts[v] as usize;
+            for b in 0..num_blocks {
+                let base = (first_block + b) * block_stride;
+                let ec = blocks[base + 1] as usize;
+                for j in 0..ec.min(32) {
+                    let nb = blocks[base + 2 + j] as usize;
+                    if nb >= n || peeled[nb] { continue; }
+                    let od = degree[nb] as usize;
+                    if od <= current_bin { continue; }
+                    degree[nb] -= 1;
+                    let nd = od - 1;
+                    bins[nd].push(nb);
+                    if nd < cursor {
+                        cursor = nd; // cascade: new bin below cursor
                     }
                 }
             }
-            found = true;
-            break;
         }
-        if !found { break; }
     }
 
     let remaining = max_deg as u32;
