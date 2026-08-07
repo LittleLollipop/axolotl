@@ -41,6 +41,7 @@ pub mod gpu; // GPU 加速模块（使用 Metal）
 pub mod wave_core; // Wave Core 分解 — CPU/GPU 协同的批量剥皮
 pub mod scc; // Tarjan 强连通分量 — 有向图 SCC 分解
 pub mod betweenness; // Brandes 介数中心性 — 采样近似, EdgeBlock BFS
+pub mod louvain; // Louvain 社群检测 — 模块度优化, 分层折叠
 pub use graph::GraphDB; // 旧版本
 pub use algorithms::*;
 pub use persistence::*;
