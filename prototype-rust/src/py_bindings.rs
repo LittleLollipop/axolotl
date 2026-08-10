@@ -9,7 +9,7 @@
 //   g.save()
 
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyTuple};
+use pyo3::types::{PyDict, PyList, PyTuple};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -221,6 +221,58 @@ impl AxolotlGraph {
         let core = crate::wave_core::wave_core_blocks(eb);
         let result = PyDict::new(py);
         for (i, &c) in core.iter().enumerate() {
+            if i < eb.idx_to_id.len() && eb.idx_to_id[i] != u64::MAX {
+                result.set_item(eb.idx_to_id[i], c)?;
+            }
+        }
+        Ok(result)
+    }
+
+    /// Tarjan SCC → list of lists of vertex ids
+    fn tarjan_scc<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let db = self.db.lock().unwrap();
+        let eb = db.edgeblock().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Graph not in InMemory mode")
+        })?;
+        let sccs = crate::scc::tarjan_scc(eb);
+        let result = PyList::empty(py);
+        for scc in &sccs {
+            let comp = PyList::empty(py);
+            for &idx in scc {
+                if idx < eb.idx_to_id.len() && eb.idx_to_id[idx] != u64::MAX {
+                    comp.append(eb.idx_to_id[idx])?;
+                }
+            }
+            result.append(comp)?;
+        }
+        Ok(result)
+    }
+
+    /// Sampled betweenness centrality → dict[id → score]
+    fn betweenness<'py>(&self, py: Python<'py>, num_sources: Option<usize>) -> PyResult<Bound<'py, PyDict>> {
+        let db = self.db.lock().unwrap();
+        let eb = db.edgeblock().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Graph not in InMemory mode")
+        })?;
+        let bc = crate::betweenness::brandes_betweenness(eb, num_sources);
+        let result = PyDict::new(py);
+        for (i, &score) in bc.iter().enumerate() {
+            if i < eb.idx_to_id.len() && eb.idx_to_id[i] != u64::MAX {
+                result.set_item(eb.idx_to_id[i], score)?;
+            }
+        }
+        Ok(result)
+    }
+
+    /// Louvain community detection → dict[id → community_id]
+    fn louvain<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let db = self.db.lock().unwrap();
+        let eb = db.edgeblock().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Graph not in InMemory mode")
+        })?;
+        let (comm, _passes) = crate::louvain::louvain_communities(eb);
+        let result = PyDict::new(py);
+        for (i, &c) in comm.iter().enumerate() {
             if i < eb.idx_to_id.len() && eb.idx_to_id[i] != u64::MAX {
                 result.set_item(eb.idx_to_id[i], c)?;
             }
