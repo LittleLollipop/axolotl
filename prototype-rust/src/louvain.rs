@@ -146,9 +146,10 @@ pub fn louvain_communities(eb: &GPUEdgeBlockGraph) -> (Vec<usize>, usize) {
         // Renumber for clean community IDs
         let nc = renumber(&mut comm);
 
-        // Phase 2: aggregate into super-graph
-        let mut super_edges: HashMap<(usize, usize), f64> = HashMap::new();
-        let mut internal_weight: Vec<f64> = vec![0.0; nc];
+        // Phase 2: single-pass aggregation + edge building
+        let mut super_g = GPUEdgeBlockGraph::new();
+        for c in 0..nc { super_g.add_vertex(c as u64, HashMap::new()); }
+        let mut internal_w: Vec<f64> = vec![0.0; nc];
 
         for v in 0..curr_n {
             let fbv = vertices[v] as usize;
@@ -158,30 +159,24 @@ pub fn louvain_communities(eb: &GPUEdgeBlockGraph) -> (Vec<usize>, usize) {
                 let ec = blocks[base + 1] as usize;
                 for j in 0..ec.min(32) {
                     let w = blocks[base + 2 + j] as usize;
-                    if w >= curr_n || w == v { continue; }
+                    if w >= curr_n { continue; }
                     let cu = comm[v];
                     let cv = comm[w];
                     if cu == cv {
-                        internal_weight[cu] += 1.0;
-                    } else {
-                        let key = (cu.min(cv), cu.max(cv));
-                        *super_edges.entry(key).or_insert(0.0) += 1.0;
+                        if v < w { internal_w[cu] += 1.0; } // count undirected once
+                    } else if v < w {
+                        // Add cross-edge in both directions (only once per undirected pair)
+                        super_g.add_edge(cu as u64, cv as u64, 1.0);
+                        super_g.add_edge(cv as u64, cu as u64, 1.0);
                     }
                 }
             }
         }
 
-        // Build new graph: super-nodes
-        let mut super_g = GPUEdgeBlockGraph::new();
         for c in 0..nc {
-            super_g.add_vertex(c as u64, HashMap::new());
-            if internal_weight[c] > 0.0 {
-                super_g.add_edge(c as u64, c as u64, internal_weight[c] as f32);
+            if internal_w[c] > 0.0 {
+                super_g.add_edge(c as u64, c as u64, internal_w[c] as f32);
             }
-        }
-        for ((u, v), w) in super_edges {
-            super_g.add_edge(u as u64, v as u64, w as f32);
-            super_g.add_edge(v as u64, u as u64, w as f32);
         }
 
         // Map original vertex degrees to super-nodes
