@@ -374,6 +374,21 @@ impl MmapGraph {
         result
     }
 
+    /// 查顶点的入边邻居 ID 列表（反向遍历）
+    /// 边索引按 (from, to) 排序，入边需线性扫描全边表 O(E)。
+    /// mmap 模式主要用于超大只读图；如需频繁反向查询，建议 InMemory 模式
+    /// （EdgeBlock 维护 reverse_blocks，反向查询 O(deg)）。
+    pub fn in_neighbors(&self, id: u64) -> Vec<u64> {
+        let mut result = Vec::new();
+        for i in 0..self.edge_count {
+            let (from, to, _, _, _) = self.edge_idx(i);
+            if to == id {
+                result.push(from);
+            }
+        }
+        result
+    }
+
     /// 迭代所有顶点（O(n)，直接从 mmap 读）
     pub fn iter_vertices(&self) -> MmapVertexIter<'_> {
         MmapVertexIter {

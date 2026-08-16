@@ -144,6 +144,11 @@ impl AxolotlGraph {
         self.db.lock().unwrap().out_neighbors(id)
     }
 
+    /// in_neighbors(id) → [neighbor_id, ...]  （入边/反向遍历）
+    fn in_neighbors(&self, id: u64) -> Vec<u64> {
+        self.db.lock().unwrap().in_neighbors(id)
+    }
+
     // ── 算法 ──
 
     /// pagerank(iterations=100, damping=0.85) → dict[id → score]

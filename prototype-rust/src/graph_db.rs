@@ -332,6 +332,18 @@ impl GraphDB {
         }
     }
 
+    /// 入边邻居（反向遍历：从目标找源头，语义追踪的向上追溯）
+    pub fn in_neighbors(&self, id: u64) -> Vec<u64> {
+        match self.mode {
+            GraphMode::InMemory => {
+                self.edgeblock.as_ref().unwrap().in_neighbors(id)
+            }
+            GraphMode::Mmap => {
+                self.mmap.as_ref().unwrap().in_neighbors(id)
+            }
+        }
+    }
+
     // ── 增强遍历 ─────────────────────────
 
     /// 多跳遍历
