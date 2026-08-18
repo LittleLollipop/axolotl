@@ -29,6 +29,19 @@ fn main() {
     println!("顶点数: {}", vertices.len());
     println!("边数:   {}", edges.len());
 
+    // 悬挂边检测：source/target 引用不存在的顶点
+    let ids: std::collections::HashSet<u64> = vertices.iter().map(|(id, _)| *id).collect();
+    let dangling: Vec<&(u64, u64, f64, std::collections::HashMap<String, axolotl_rs::PropertyValue>)> =
+        edges.iter().filter(|(f, t, _, _)| !ids.contains(f) || !ids.contains(t)).collect();
+    if dangling.is_empty() {
+        println!("悬挂边: 0（所有边两端顶点均存在）");
+    } else {
+        println!("悬挂边: {} 条（引用不存在的顶点）", dangling.len());
+        for (f, t, _, _) in dangling.iter().take(10) {
+            println!("  {} -> {}  [{}]", f, t, if ids.contains(f) { "from 存在" } else { "from 缺失" });
+        }
+    }
+
     // 按 domain 统计
     let mut by_domain: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     let mut by_status: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();

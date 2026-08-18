@@ -222,9 +222,15 @@ function addSubgraph(centerId, depth) {
     if (d > depth) continue;
     nodeIds.push(String(nid));
     for (const e of outgoingOf(nid)) {
-      edgeKeys.push(`${e.from}->${e.to}`);
-      if (d < depth && !seen.has(String(e.to))) {
-        seen.add(String(e.to));
+      // 目标顶点缺失（数据层悬挂边）→ 跳过
+      if (!graph.vertices.has(e.to)) continue;
+      const targetId = String(e.to);
+      // 边只在两端都会渲染时才添加：
+      // 已在图上 / 已入队 / 尚可继续向下展开（d < depth 时目标会入队）
+      const targetWillRender = inCy.has(targetId) || seen.has(targetId) || d < depth;
+      if (targetWillRender) edgeKeys.push(`${e.from}->${e.to}`);
+      if (d < depth && !seen.has(targetId)) {
+        seen.add(targetId);
         queue.push([e.to, d + 1]);
       }
     }
