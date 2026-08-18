@@ -1,0 +1,170 @@
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --border: #e2e5ea;
+  --text: #1f2329;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-soft: #eff4ff;
+  --danger: #dc2626;
+  --radius: 8px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* ── 顶部工具栏 ── */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  padding: 0 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+#toolbar .spacer { flex: 1; }
+#file-info { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+#stats { white-space: nowrap; }
+
+.btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  cursor: pointer;
+  font-size: 13px;
+}
+.btn:hover { background: #f0f2f5; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: #1d4ed8; }
+
+/* ── 三栏布局 ── */
+#layout {
+  display: flex;
+  height: calc(100% - 46px);
+}
+#side {
+  width: 260px;
+  min-width: 220px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+#graph-wrap { flex: 1; position: relative; min-width: 0; }
+#detail {
+  width: 300px;
+  min-width: 260px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* ── 左栏：搜索 + 列表 ── */
+#side input[type="text"], #side select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  background: #fff;
+}
+#side input:focus, #side select:focus { border-color: var(--accent); }
+#search { margin: 10px 10px 6px; }
+#filters { display: flex; gap: 6px; padding: 0 10px 8px; }
+#filters select { flex: 1; padding: 5px 6px; font-size: 12px; }
+
+#node-list {
+  flex: 1;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  padding: 4px 0;
+}
+.node-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.node-item:hover { background: #f3f5f8; }
+.node-item.active { background: var(--accent-soft); border-left-color: var(--accent); }
+.node-item .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.node-item .nid { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.empty { color: var(--muted); text-align: center; padding: 24px 12px; font-size: 12px; }
+
+/* ── 主区：图 ── */
+#cy { position: absolute; inset: 0; background: var(--bg); }
+#hint {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  background: rgba(255,255,255,.92);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+}
+
+/* ── 右栏：详情 ── */
+.detail-head { margin-bottom: 10px; }
+.detail-head h3 { font-size: 15px; word-break: break-all; }
+#detail-sub { font-size: 12px; }
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 14px 0 6px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+#detail-props { width: 100%; border-collapse: collapse; font-size: 12px; }
+#detail-props td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #f0f1f4;
+  vertical-align: top;
+  word-break: break-all;
+}
+#detail-props td:first-child { color: var(--muted); width: 34%; }
+.neighbors { list-style: none; }
+.neighbors li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.neighbors li:hover { background: #f3f5f8; }
+.neighbors .kind-tag {
+  font-size: 10px;
+  background: #eef1f5;
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

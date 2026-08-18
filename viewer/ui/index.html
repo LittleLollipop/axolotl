@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Axolotl Viewer — 图库查看器</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="toolbar">
+  <button id="btn-open" class="btn primary">打开图库…</button>
+  <span id="file-info" class="muted">未打开文件</span>
+  <span id="stats" class="muted"></span>
+  <span class="spacer"></span>
+  <span id="status" class="muted"></span>
+</header>
+
+<div id="layout">
+  <aside id="side">
+    <input id="search" type="text" placeholder="搜索节点（id / label）…" autocomplete="off">
+    <div id="filters">
+      <select id="filter-domain">
+        <option value="">全部 domain</option>
+      </select>
+      <select id="filter-type">
+        <option value="">全部类型</option>
+      </select>
+    </div>
+    <div id="node-list"><div class="empty">打开图库后显示节点列表</div></div>
+  </aside>
+
+  <main id="graph-wrap">
+    <div id="cy"></div>
+    <div id="hint" class="muted">
+      <b>提示</b>：单击节点查看详情 · 双击展开邻居 · 拖拽空白平移 · 滚轮缩放
+    </div>
+  </main>
+
+  <aside id="detail">
+    <div class="empty" id="detail-empty">选中节点后在此查看属性与邻居</div>
+    <div id="detail-body" hidden>
+      <div class="detail-head">
+        <h3 id="detail-title"></h3>
+        <span id="detail-sub" class="muted"></span>
+      </div>
+      <div class="section-label">属性</div>
+      <table id="detail-props"></table>
+      <div class="section-label">出边邻居 <span class="muted" id="detail-out-count"></span></div>
+      <ul id="detail-out" class="neighbors"></ul>
+      <div class="section-label">入边邻居 <span class="muted" id="detail-in-count"></span></div>
+      <ul id="detail-in" class="neighbors"></ul>
+    </div>
+  </aside>
+</div>
+
+<script src="vendor/cytoscape.min.js"></script>
+<script src="main.js"></script>
+</body>
+</html>
