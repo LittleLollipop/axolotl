@@ -431,7 +431,12 @@ impl GraphDB {
                 for i in 0..eb.vertex_count as usize {
                     let from_id = eb.idx_to_id[i];
                     for to_id in eb.out_neighbors_by_idx(i) {
-                        result.push((from_id, to_id, 1.0, HashMap::new()));
+                        // 边属性/权重存于 edge_data（HashMap<(from,to), EdgeData>），
+                        // 补全而非默认 1.0/空属性 —— 供遍历导出与 viewer 使用。
+                        match eb.edge_data.get(&(from_id, to_id)) {
+                            Some(ed) => result.push((from_id, to_id, ed.weight as f64, ed.properties.clone())),
+                            None => result.push((from_id, to_id, 1.0, HashMap::new())),
+                        }
                     }
                 }
                 Box::new(result.into_iter())
