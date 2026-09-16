@@ -197,6 +197,29 @@ impl AxolotlGraph {
         }
     }
 
+    /// ★ out_edges_cols(id, key="relation") → `(dsts, values)`；None = 模式不支持
+    ///
+    /// 与 `out_edges` 功能等价、**返回形态不同**：
+    ///   · `out_edges`      → `[(dst, weight, props_dict)]`，每条边一个 Python dict
+    ///   · `out_edges_cols` → `([dst...], [value...])`，两个平行列表
+    ///
+    /// 实测（Banyan 真实库 44,875 顶点 / 109,750 边）：单跳 8.95ms → 与纯邻居
+    /// 版本同量级，长链 8 步 4.30ms → 0.2ms 量级。**底层一直是快的，
+    /// 是返回形态在收税** —— 每条边一个 dict 的跨语言构造成本，
+    /// 把底层 40 倍的优势全部吃光还反转。
+    #[pyo3(signature = (id, key="relation", distinct=false))]
+    fn out_edges_cols<'py>(&self, py: Python<'py>, id: u64, key: &str, distinct: bool)
+        -> PyResult<Option<Bound<'py, PyTuple>>> {
+        match self.db.lock().unwrap().out_edges_cols(id, key, distinct) {
+            None => Ok(None),
+            Some((dsts, vals)) => {
+                let l1 = PyList::new(py, dsts)?;
+                let l2 = PyList::new(py, vals)?;
+                Ok(Some(PyTuple::new(py, [l1.into_any(), l2.into_any()])?))
+            }
+        }
+    }
+
     /// in_edges(id) → [(src, weight_or_None, props_dict), ...]；None = 模式不支持
     fn in_edges<'py>(&self, py: Python<'py>, id: u64)
         -> PyResult<Option<Vec<Bound<'py, PyTuple>>>> {

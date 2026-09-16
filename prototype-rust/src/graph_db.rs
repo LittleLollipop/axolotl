@@ -345,6 +345,19 @@ impl GraphDB {
              .collect())
     }
 
+    /// ★ 紧凑返回：`(dsts, values)` 并列数组 —— 全部出边 + 指定字符串属性。
+    ///
+    /// 与 `out_edges` 的差别**只在返回形态**：那个给每条边一个
+    /// `(dst, weight, props_dict)`（Python 侧是 N 个 dict），这个给两个平行列表。
+    /// 见 `GPUEdgeBlockGraph::out_edges_cols` 上的实测性能表。
+    /// `None` = 该模式不支持（**不是「没有边」**）。
+    pub fn out_edges_cols(&self, id: u64, key: &str, distinct: bool)
+        -> Option<(Vec<u64>, Vec<String>)>
+    {
+        let eb = self.edgeblock()?;
+        Some(eb.out_edges_cols(id, key, distinct))
+    }
+
     /// 入边的对称版本 → `[(src, weight, props)]`。
     pub fn in_edges(&self, id: u64)
         -> Option<Vec<(u64, Option<f64>, HashMap<String, PropertyValue>)>> {
