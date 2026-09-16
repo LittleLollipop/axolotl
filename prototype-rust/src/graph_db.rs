@@ -90,6 +90,20 @@ impl GraphDB {
         Self::open_internal(path, mode, false)
     }
 
+    /// 文件头是不是旧 PersistentGraph 的 `AXOL`？
+    ///
+    /// 只读 4 字节，不做任何解析 —— 目的只是把「走哪条解析器」这件事
+    /// 从**试错**变成**先看**。读不到、或 magic 不是 `AXOL`，一律交还给
+    /// EdgeBlock 解析器，让它报出自己的真实错误。
+    fn is_legacy_format(path: &str) -> bool {
+        use std::io::Read;
+        let mut magic = [0u8; 4];
+        match std::fs::File::open(path) {
+            Ok(mut f) => f.read_exact(&mut magic).is_ok() && &magic == b"AXOL",
+            Err(_) => false,
+        }
+    }
+
     fn open_internal<P: AsRef<Path>>(
         path: P,
         mode: GraphMode,
@@ -101,13 +115,23 @@ impl GraphDB {
         match mode {
             GraphMode::InMemory => {
                 let mut eb = if std::path::Path::new(&path_str).exists() {
-                    // 优先使用原生 EdgeBlock 格式加载
-                    if let Ok(g) = crate::gpu_edge_block::GPUEdgeBlockGraph::open(&path_str) {
-                        g
-                    } else {
-                        // 回退到旧 PersistentGraph 格式
+                    // ★ 先探测 magic，再决定走哪条路 —— **不做「试一个再回退」**。
+                    //
+                    // 原实现是「试 EdgeBlock，失败就静默回退 PersistentGraph」，
+                    // 于是**任何** EdgeBlock 侧的失败（版本不符、字段越界、文件真损坏）
+                    // 都会被包装成 PersistentGraph 的 "Invalid magic bytes" ——
+                    // 一个与真实原因毫不相干的错误。
+                    //
+                    // 实测代价：加 FILE_VERSION 校验后现存图库（版本 1）被拒，
+                    // 报出来的却是 magic 错，排查方向一度跑偏到「文件是不是坏了」。
+                    // 「不知道」和「坏了」在界面上长得一样，是本项目最顽固的 bug 形状。
+                    if Self::is_legacy_format(&path_str) {
                         let pg = crate::PersistentGraph::open(&path_str)?;
                         Self::persistent_to_edgeblock(&pg)
+                    } else {
+                        // 用 `?` 而不是 `if let Ok`：让 EdgeBlock 解析器的
+                        // **原始错误**透出来 —— 它是唯一知道真实原因的那个。
+                        crate::gpu_edge_block::GPUEdgeBlockGraph::open(&path_str)?
                     }
                 } else {
                     // 文件不存在：创建空 EdgeBlock

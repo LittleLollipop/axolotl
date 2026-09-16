@@ -1178,19 +1178,6 @@ impl GPUEdgeBlockGraph {
         f.read_exact(&mut hdr)?;
         let version = u16::from_be_bytes([hdr[0], hdr[1]]);
         let cap = u16::from_be_bytes([hdr[2], hdr[3]]);
-        if version != Self::FILE_VERSION {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "AXEB 文件版本 {} 与本代码的 {} 不符。版本 1 的 block header \
-                     槽 0 是 ownerVertex，版本 2 起是 nextBlock 链指针 —— 布局相同\
-                     但语义不同，混用会**静默读到错误的邻居**。处理：用产生该文件\
-                     的旧代码导出，或重新构建图。",
-                    version,
-                    Self::FILE_VERSION
-                ),
-            ));
-        }
         if cap as usize != Self::BLOCK_CAPACITY {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -1201,6 +1188,31 @@ impl GPUEdgeBlockGraph {
                 ),
             ));
         }
+        // 版本 1 **可迁移** —— 既不是「可接受」，也不是「可拒绝」。
+        //
+        // 版本 1 的槽 0 是 `ownerVertex`（这个 block 属于谁），而读取侧按
+        // **连续区间**走 —— 那正是版本 1 的缺陷：一个顶点的多个 block 在数组里
+        // 不保证相邻。而 `ownerVertex` 恰好记着「谁拥有这个 block」，所以按它
+        // 分组就能把每个顶点的 block 找齐并串成链（见 `migrate_v1_blocks`）。
+        //
+        // ⚠️ **不能拒绝**：现存图库（含 `lobster-memory` 的记忆）都是版本 1 的，
+        //    拒绝等于把记忆弄丢。收到这个错误时先想「数据还能救吗」，
+        //    再决定是报错还是迁移 —— 直接拒绝是最省事也最不可逆的那个选择。
+        let need_migrate = match version {
+            1 => true,
+            v if v == Self::FILE_VERSION => false,
+            other => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "AXEB 文件版本 {} 本代码不认识（支持 1（自动迁移）与 {}）。\
+                         布局相同但语义可能不同，**静默误读比报错危险得多**。",
+                        other,
+                        Self::FILE_VERSION
+                    ),
+                ));
+            }
+        };
         let vertex_count = u32::from_be_bytes([hdr[4], hdr[5], hdr[6], hdr[7]]);
         let total_edges = u64::from_be_bytes([
             hdr[8], hdr[9], hdr[10], hdr[11],
@@ -1235,12 +1247,12 @@ impl GPUEdgeBlockGraph {
         }
 
         let idx_to_id = read_u64_vec(&mut f)?;
-        let vertices = read_u32_vec(&mut f)?;
+        let mut vertices = read_u32_vec(&mut f)?;
         let block_counts = read_u32_vec(&mut f)?;
-        let blocks = read_u32_vec(&mut f)?;
-        let reverse_vertices = read_u32_vec(&mut f)?;
+        let mut blocks = read_u32_vec(&mut f)?;
+        let mut reverse_vertices = read_u32_vec(&mut f)?;
         let reverse_block_counts = read_u32_vec(&mut f)?;
-        let reverse_blocks = read_u32_vec(&mut f)?;
+        let mut reverse_blocks = read_u32_vec(&mut f)?;
 
         // ID mapping
         let id_to_idx: std::collections::HashMap<u64, usize> =
@@ -1302,7 +1314,7 @@ impl GPUEdgeBlockGraph {
                 .push(EdgeData { weight, properties: props });
         }
 
-        Ok(GPUEdgeBlockGraph {
+        let mut g = GPUEdgeBlockGraph {
             vertices,
             block_counts,
             blocks,
@@ -1319,7 +1331,52 @@ impl GPUEdgeBlockGraph {
             blocks_dirty: true,
             reverse_blocks_dirty: true,
             structure_dirty: true,
-        })
+        };
+        if need_migrate {
+            // 版本 1 的一个顶点的 block 段**不保证连续**（那正是它的缺陷），
+            // 所以不能按连续区间走 —— 用槽 0 的 ownerVertex 重新串链。
+            Self::migrate_v1_blocks(&mut g.blocks, &mut g.vertices);
+            Self::migrate_v1_blocks(&mut g.reverse_blocks, &mut g.reverse_vertices);
+        }
+        Ok(g)
+    }
+
+    /// 把**版本 1** 的 block 数组就地迁移到版本 2 的链式布局。
+    ///
+    /// 版本 1：槽 0 = `ownerVertex`（这个 block 属于谁），读取靠连续区间（有缺陷）
+    /// 版本 2：槽 0 = `nextBlock`（链指针），读取靠链
+    ///
+    /// 迁移依据：`ownerVertex` 记的正是「谁拥有这个 block」，所以按它分组
+    /// 就能把每个顶点的 block 找齐。组内按 block 索引升序 = **添加顺序**
+    /// （新 block 一律 `push` 到数组末尾，所以索引大的更晚添加）。
+    ///
+    /// 为什么不需要重建图：**拓扑数据本身是完整的** —— 每次 `add_edge` 都
+    /// 老老实实 `push` 了边，坏的只是「怎么从顶点走到它的 block」。
+    /// 所以这是一次索引方式的重写，不是数据修复。
+    fn migrate_v1_blocks(blocks: &mut [u32], vertices: &mut [u32]) {
+        let nblk = blocks.len() / Self::BLOCK_SIZE_U32;
+        let nv = vertices.len();
+        let mut by_owner: Vec<Vec<u32>> = vec![Vec::new(); nv];
+        for b in 0..nblk {
+            let owner = blocks[b * Self::BLOCK_SIZE_U32] as usize;
+            if owner < nv {
+                by_owner[owner].push(b as u32);
+            }
+        }
+        for v in 0..nv {
+            let chain = &by_owner[v];
+            if chain.is_empty() {
+                vertices[v] = Self::NO_BLOCK;
+                continue;
+            }
+            for w in chain.windows(2) {
+                let prev = w[0] as usize * Self::BLOCK_SIZE_U32;
+                blocks[prev] = w[1];
+            }
+            let last = *chain.last().unwrap() as usize * Self::BLOCK_SIZE_U32;
+            blocks[last] = Self::NO_BLOCK;
+            vertices[v] = chain[0];
+        }
     }
 
     // ── Property value encoding ──
@@ -1520,12 +1577,71 @@ mod tests {
         let mut bytes = std::fs::read(p).unwrap();
         assert_eq!(&bytes[0..4], b"AXEB");
         bytes[4] = 0;
-        bytes[5] = 1; // 版本 1
+        bytes[5] = 99; // 不认识的版本
         std::fs::write(p, &bytes).unwrap();
 
-        let err = GPUEdgeBlockGraph::open(p).expect_err("版本 1 必须被拒绝");
+        let err = GPUEdgeBlockGraph::open(p).expect_err("版本 99 必须被拒绝");
         let msg = format!("{}", err);
         assert!(msg.contains("版本"), "错误信息必须说清是版本问题: {msg}");
+        assert!(
+            !msg.contains("magic"),
+            "错误信息**不许**伪装成 magic 问题 —— 那会把排查带偏: {msg}"
+        );
+    }
+
+    /// ★ 版本 1 必须**能读**（靠迁移），不是被拒绝。
+    ///
+    /// 版本 1 的一个顶点的 block 段不保证连续 —— 那正是它的缺陷。而
+    /// `ownerVertex` 恰好记着「谁拥有这个 block」，所以能按它重新串链。
+    /// 拒绝等于把现存图库（含 `lobster-memory` 的记忆）弄丢。
+    #[test]
+    fn test_migrate_v1_blocks_rewires_chain() {
+        // ⚠️ 块的步长是 `BLOCK_SIZE_U32`（= 34），**不是** `BLOCK_CAPACITY`（= 32）。
+        //    32 只是能装几条边，header 另占 2 个 u32。第一版测试把这两个搞混了，
+        //    于是 96 个 u32 只解析出 2 个块，第三块压根没被扫到 ——
+        //    断言失败在「不该失败的地方」，而真正的原因在测试自己身上。
+        let stride = GPUEdgeBlockGraph::BLOCK_SIZE_U32;
+        let mut blocks: Vec<u32> = Vec::new();
+
+        // 顶点 0 的第 1 个 block（索引 0）：2 条边
+        blocks.push(0); blocks.push(2); blocks.push(10); blocks.push(11);
+        for _ in 4..stride { blocks.push(0); }
+        // 顶点 1 的 block（索引 1）：1 条边 —— **插在中间**
+        blocks.push(1); blocks.push(1); blocks.push(20);
+        for _ in 3..stride { blocks.push(0); }
+        // 顶点 0 的第 2 个 block（索引 2）：1 条边 —— 与它的第一个**不相邻**
+        blocks.push(0); blocks.push(1); blocks.push(12);
+        for _ in 3..stride { blocks.push(0); }
+
+        // 版本 1 形状：槽 0 = ownerVertex；`vertices` = 第一个 block 索引
+        let mut vertices = vec![0u32, 1];
+        let bc = vec![2u32, 1]; // block 数（版本 1 里这个字段同样可信）
+
+        GPUEdgeBlockGraph::migrate_v1_blocks(&mut blocks, &mut vertices);
+
+        assert_eq!(vertices[0], 0, "顶点 0 的链从 block 0 开始");
+        assert_eq!(blocks[0], 2, "block 0 的 next 应指向 block 2（不相邻也要串上）");
+        assert_eq!(blocks[2 * stride], GPUEdgeBlockGraph::NO_BLOCK, "block 2 是链尾");
+        assert_eq!(vertices[1], 1);
+        assert_eq!(blocks[stride], GPUEdgeBlockGraph::NO_BLOCK, "顶点 1 只有一个 block");
+
+        // 迁移后必须能**走链**读出正确的邻居 —— 这才是它存在的目的
+        //
+        // 建 16 个顶点而不是 2 个：上面那些边指向 10/11/12/20，而
+        // `out_neighbors` 会**过滤掉不存在的顶点索引**（`target_idx <
+        // idx_to_id.len()`）。只建 2 个顶点的话全部边都会被过滤掉，
+        // 断言会以「0 条边」的形式失败 —— 而原因在测试的脚手架，不在被测代码。
+        let mut g = GPUEdgeBlockGraph::new();
+        for i in 0..21u64 {
+            g.add_vertex(i, HashMap::new());
+        }
+        g.blocks = blocks;
+        g.vertices = vertices;
+        g.block_counts = bc;
+        assert_eq!(g.out_neighbors(0).len(), 3, "顶点 0 应有 3 条边");
+        assert_eq!(g.out_neighbors(1).len(), 1, "顶点 1 应有 1 条边");
+        // 顶点 0 的第 3 条边在**第二个 block** 里（索引 2）—— 不串链就读不到
+        assert!(g.out_neighbors(0).contains(&12), "跨 block 的那条边必须读得到");
     }
 
     // ── 平行边（一对顶点之间多条边）─────────────────────────────
