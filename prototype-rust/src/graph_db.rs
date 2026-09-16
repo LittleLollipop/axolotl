@@ -321,6 +321,39 @@ impl GraphDB {
         }
     }
 
+    /// 一对顶点之间的**全部平行边**；`None` = 这个模式不支持（**不是"没有边"**）。
+    ///
+    /// 为什么用 `Option` 而不是空 `Vec`：空 vec 与"这一对之间没有边"
+    /// 长得一模一样，调用方分不出"不支持"和"没有" —— 那就是静默失败。
+    pub fn get_edges(&self, from: u64, to: u64)
+        -> Option<Vec<(f64, HashMap<String, PropertyValue>)>> {
+        let eb = self.edgeblock()?;
+        Some(eb.get_edges(from, to).iter()
+             .map(|d| (d.weight as f64, d.properties.clone()))
+             .collect())
+    }
+
+    /// ★ 一次拿到一个顶点的**全部出边及其数据** → `[(dst, weight, props)]`。
+    ///
+    /// `weight` 是 `Option`：拓扑层有这条边、属性层却查不到时为 `None` ——
+    /// 不拿默认值糊过去，让"这条边没有数据"能被看见。
+    pub fn out_edges(&self, id: u64)
+        -> Option<Vec<(u64, Option<f64>, HashMap<String, PropertyValue>)>> {
+        let eb = self.edgeblock()?;
+        Some(eb.out_edges(id).into_iter()
+             .map(|(d, w, p)| (d, w.map(|x| x as f64), p))
+             .collect())
+    }
+
+    /// 入边的对称版本 → `[(src, weight, props)]`。
+    pub fn in_edges(&self, id: u64)
+        -> Option<Vec<(u64, Option<f64>, HashMap<String, PropertyValue>)>> {
+        let eb = self.edgeblock()?;
+        Some(eb.in_edges(id).into_iter()
+             .map(|(s, w, p)| (s, w.map(|x| x as f64), p))
+             .collect())
+    }
+
     pub fn out_neighbors(&self, id: u64) -> Vec<u64> {
         match self.mode {
             GraphMode::InMemory => {
@@ -429,14 +462,17 @@ impl GraphDB {
                 let eb = self.edgeblock.as_ref().unwrap();
                 let mut result: Vec<(u64, u64, f64, HashMap<String, PropertyValue>)> = Vec::new();
                 for i in 0..eb.vertex_count as usize {
+                    if eb.idx_to_id[i] == u64::MAX { continue; }   // 已删除的顶点
                     let from_id = eb.idx_to_id[i];
-                    for to_id in eb.out_neighbors_by_idx(i) {
-                        // 边属性/权重存于 edge_data（HashMap<(from,to), EdgeData>），
-                        // 补全而非默认 1.0/空属性 —— 供遍历导出与 viewer 使用。
-                        match eb.edge_data.get(&(from_id, to_id)) {
-                            Some(ed) => result.push((from_id, to_id, ed.weight as f64, ed.properties.clone())),
-                            None => result.push((from_id, to_id, 1.0, HashMap::new())),
-                        }
+                    // ★ 用 `out_edges`（它已按**追加序**把拓扑对到属性），
+                    //   而不是 `out_neighbors` + `get_edge`：后者在一对之间
+                    //   有平行边时，会把**同一条**重复输出多次，同时丢掉其余的。
+                    for (to_id, weight, props) in eb.out_edges(from_id) {
+                        // 导出路径的签名是 f64，没有 Option 的位置。
+                        // "拓扑有边、属性查不到"在正常路径上不该出现
+                        // （add_edge 总是同时写两边）；真出现时会在别处以
+                        // 不一致的形式暴露，而不是在这里被悄悄补成 1.0。
+                        result.push((from_id, to_id, weight.unwrap_or(1.0) as f64, props));
                     }
                 }
                 Box::new(result.into_iter())

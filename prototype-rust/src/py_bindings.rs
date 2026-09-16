@@ -149,6 +149,74 @@ impl AxolotlGraph {
         self.db.lock().unwrap().in_neighbors(id)
     }
 
+    /// get_edges(from, to) → [(weight, props_dict), ...]；None = 该模式不支持
+    ///
+    /// 与 `get_edge` 的区别：一对顶点之间可能有**多条平行边**（拓扑层不去重，
+    /// 同一对出现几次就是几条；实测 `out_neighbors(1) = [2,2,2]`）。
+    /// `get_edge` 只给最后一条，这个给**全部**。
+    fn get_edges<'py>(&self, py: Python<'py>, from_id: u64, to_id: u64)
+        -> PyResult<Option<Vec<Bound<'py, PyTuple>>>> {
+        let rows = self.db.lock().unwrap().get_edges(from_id, to_id);
+        match rows {
+            None => Ok(None),
+            Some(v) => {
+                let mut out = Vec::with_capacity(v.len());
+                for (w, props) in v {
+                    out.push(PyTuple::new(py, [
+                        w.to_object(py),
+                        props_to_pydict(py, &props)?.into_any().to_object(py),
+                    ])?);
+                }
+                Ok(Some(out))
+            }
+        }
+    }
+
+    /// ★ out_edges(id) → [(dst, weight_or_None, props_dict), ...]；None = 模式不支持
+    ///
+    /// 一次拿到一个顶点的**全部出边及其权重与属性**：
+    ///   · 省掉「先 out_neighbors，再对每个邻居 get_edge」的 N 次跨语言往返
+    ///   · 同一目标有多条平行边时**都能拿到**（get_edge 只能给最后一条）
+    ///   · 权重为 None = 拓扑层有这条边但属性层查不到（**不拿默认值糊过去**）
+    fn out_edges<'py>(&self, py: Python<'py>, id: u64)
+        -> PyResult<Option<Vec<Bound<'py, PyTuple>>>> {
+        let rows = self.db.lock().unwrap().out_edges(id);
+        match rows {
+            None => Ok(None),
+            Some(v) => {
+                let mut out = Vec::with_capacity(v.len());
+                for (dst, w, props) in v {
+                    out.push(PyTuple::new(py, [
+                        dst.to_object(py),
+                        match w { Some(x) => x.to_object(py), None => py.None() },
+                        props_to_pydict(py, &props)?.into_any().to_object(py),
+                    ])?);
+                }
+                Ok(Some(out))
+            }
+        }
+    }
+
+    /// in_edges(id) → [(src, weight_or_None, props_dict), ...]；None = 模式不支持
+    fn in_edges<'py>(&self, py: Python<'py>, id: u64)
+        -> PyResult<Option<Vec<Bound<'py, PyTuple>>>> {
+        let rows = self.db.lock().unwrap().in_edges(id);
+        match rows {
+            None => Ok(None),
+            Some(v) => {
+                let mut out = Vec::with_capacity(v.len());
+                for (src, w, props) in v {
+                    out.push(PyTuple::new(py, [
+                        src.to_object(py),
+                        match w { Some(x) => x.to_object(py), None => py.None() },
+                        props_to_pydict(py, &props)?.into_any().to_object(py),
+                    ])?);
+                }
+                Ok(Some(out))
+            }
+        }
+    }
+
     // ── 算法 ──
 
     /// pagerank(iterations=100, damping=0.85) → dict[id → score]
@@ -394,6 +462,16 @@ impl AxolotlGraph {
 }
 
 // ── 类型转换 ─────────────────────────
+
+/// `HashMap<String, PropertyValue>` → Python dict
+fn props_to_pydict<'py>(py: Python<'py>, props: &HashMap<String, PropertyValue>)
+    -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    for (k, v) in props {
+        d.set_item(k, prop_to_py(py, v))?;
+    }
+    Ok(d)
+}
 
 fn dict_to_props(dict: Option<Bound<'_, PyDict>>) -> HashMap<String, PropertyValue> {
     let mut props = HashMap::new();

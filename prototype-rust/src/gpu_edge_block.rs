@@ -69,8 +69,17 @@ pub struct GPUEdgeBlockGraph {
 
     // ── 边计数 + 属性 ──
     pub total_edges: u64,
-    /// 边属性存储（外部 ID → 边数据），独立于拓扑结构
-    pub edge_data: HashMap<(u64, u64), EdgeData>,
+    /// 边属性存储（外部 ID → **该对之间的全部平行边**），独立于拓扑结构。
+    ///
+    /// ★ 值是 `Vec` 而不是单个 `EdgeData`，这是被一个真实缺陷逼出来的：
+    ///   拓扑层（`blocks`）本来就是**多重**的 —— `out_neighbors` 不去重，
+    ///   同一对出现几次就是几条平行边（实测 `out_neighbors(1) = [2,2,2]`）。
+    ///   而这里原来是 `(from,to) -> EdgeData`，后写覆盖前写 ⇒
+    ///   `get_edge` 只能拿到**最后一条**，前面的边属性**静默丢失**。
+    ///   （真实场景：一个词可以同时以多种关系指向同一个类。）
+    ///
+    /// 顺序保证：与 `out_neighbors` 的返回顺序一致 —— 两者都是**追加序**。
+    pub edge_data: HashMap<(u64, u64), Vec<EdgeData>>,
 
     // ── Dirty 标记（GPU 同步用）──
     pub blocks_dirty: bool,
@@ -212,14 +221,71 @@ impl GPUEdgeBlockGraph {
         );
 
         // ── 存储边属性 ──
-        self.edge_data.insert((from, to), EdgeData { weight, properties });
+        // 追加而不是覆盖：拓扑层也是追加，两边的顺序因此保持一致
+        self.edge_data
+            .entry((from, to))
+            .or_default()
+            .push(EdgeData { weight, properties });
 
         self.total_edges += 1;
     }
 
-    /// 获取边属性
+    /// 获取边属性（**最后一条**；要全部平行边用 `get_edges`，要一次拿全用 `out_edges`）
     pub fn get_edge(&self, from: u64, to: u64) -> Option<&EdgeData> {
-        self.edge_data.get(&(from, to))
+        self.edge_data.get(&(from, to)).and_then(|v| v.last())
+    }
+
+    /// 获取一对顶点之间的**全部平行边**（按添加顺序）
+    pub fn get_edges(&self, from: u64, to: u64) -> &[EdgeData] {
+        match self.edge_data.get(&(from, to)) {
+            Some(v) => v.as_slice(),
+            None => &[],
+        }
+    }
+
+    /// ★ 一次拿到一个顶点的**全部出边及其数据** → `[(dst, weight, props)]`。
+    ///
+    /// 为什么需要它：`out_neighbors` 只给目标 id，要拿权重/属性得对每个邻居
+    /// **再调一次** `get_edge`（N 次跨语言往返）；而且同一目标有多条平行边时
+    /// `get_edge` **只能给最后一条**。这里一次返回全部。
+    ///
+    /// `weight` 是 `Option`：拓扑层有这条边、属性层却查不到时给 `None` ——
+    /// **不拿默认值糊过去**。"这条边没有数据"和"这条边权重是 1.0"
+    /// 在类型上就该分开，否则调用方永远看不出中间少了一层。
+    pub fn out_edges(&self, id: u64)
+        -> Vec<(u64, Option<f32>, HashMap<String, PropertyValue>)> {
+        self.edges_of(id, false)
+    }
+
+    /// 入边的对称版本 → `[(src, weight, props)]`。
+    pub fn in_edges(&self, id: u64)
+        -> Vec<(u64, Option<f32>, HashMap<String, PropertyValue>)> {
+        self.edges_of(id, true)
+    }
+
+    /// `out_edges` / `in_edges` 的共同实现。
+    ///
+    /// 对齐方式：`out_neighbors`(或 `in_neighbors`) 与 `edge_data` 都是追加序，
+    /// 所以第 i 次出现的对端对应 `edge_data[(a,b)][i]`。
+    fn edges_of(&self, id: u64, reverse: bool)
+        -> Vec<(u64, Option<f32>, HashMap<String, PropertyValue>)> {
+        let mut result = Vec::new();
+        let mut seen: HashMap<u64, usize> = HashMap::new();
+        let ends = if reverse { self.in_neighbors(id) } else { self.out_neighbors(id) };
+        for other in ends {
+            let slot = {
+                let c = seen.entry(other).or_insert(0);
+                let s = *c;
+                *c += 1;
+                s
+            };
+            let key = if reverse { (other, id) } else { (id, other) };
+            match self.edge_data.get(&key).and_then(|v| v.get(slot)) {
+                Some(d) => result.push((other, Some(d.weight), d.properties.clone())),
+                None => result.push((other, None, HashMap::new())),
+            }
+        }
+        result
     }
 
     /// 向顶点 v_idx 的最后一个 block 追加一条边
@@ -597,7 +663,10 @@ impl GPUEdgeBlockGraph {
         while let Some((current, depth)) = queue.pop_front() {
             if depth >= max_depth { continue; }
             for nbr in self.out_neighbors(current) {
-                edges.push((current, nbr, self.edge_data.get(&(current, nbr)).cloned()));
+                // 取该对的最后一条（与 `get_edge` 同语义）；要全部平行边用 `get_edges`
+                edges.push((current, nbr,
+                            self.edge_data.get(&(current, nbr))
+                                .and_then(|v| v.last()).cloned()));
                 if !vertices.contains(&nbr) {
                     vertices.insert(nbr);
                     queue.push_back((nbr, depth + 1));
@@ -653,8 +722,10 @@ impl GPUEdgeBlockGraph {
 
         for nbr_id in self.out_neighbors_by_idx(v_idx) {
             if let Some(ref ef) = edge_filter {
-                if let Some(ed) = self.edge_data.get(&(v_id, nbr_id)) {
-                    if !ef(ed) { continue; }
+                // 一对之间可能有多条平行边：**任一条满足**就算通过
+                // （原来是单值，取到哪条取决于覆盖顺序 —— 现在语义明确了）
+                if let Some(v) = self.edge_data.get(&(v_id, nbr_id)) {
+                    if !v.iter().any(ef) { continue; }
                 }
             }
 
@@ -883,9 +954,14 @@ impl GPUEdgeBlockGraph {
         }
 
         // Edge data: count + per-edge entries
-        let edge_count = self.edge_data.len() as u32;
-        buf.extend_from_slice(&edge_count.to_be_bytes());
-        for ((from, to), ed) in &self.edge_data {
+        // ★ 写的是「边数据**条数**」而不是「键数」—— 有平行边时两者不同。
+        //   旧格式没有平行边，所以两种读法等价（**向后兼容**，格式一个字没改）。
+        let flat: Vec<((u64, u64), &EdgeData)> = self.edge_data.iter()
+            .flat_map(|(k, v)| v.iter().map(move |e| (*k, e)))
+            .collect();
+        let n_edge_data = flat.len() as u32;
+        buf.extend_from_slice(&n_edge_data.to_be_bytes());
+        for ((from, to), ed) in flat {
             buf.extend_from_slice(&from.to_be_bytes());
             buf.extend_from_slice(&to.to_be_bytes());
             buf.extend_from_slice(&ed.weight.to_be_bytes());
@@ -1023,7 +1099,9 @@ impl GPUEdgeBlockGraph {
                 let value = Self::read_property_value(&mut f)?;
                 props.insert(key_str, value);
             }
-            edge_data.insert((from, to), EdgeData { weight, properties: props });
+            // 追加（同一个 (from,to) 可能有多条平行边，旧格式里每条各占一行）
+            edge_data.entry((from, to)).or_insert_with(Vec::new)
+                .push(EdgeData { weight, properties: props });
         }
 
         Ok(GPUEdgeBlockGraph {
@@ -1113,6 +1191,117 @@ impl GPUEdgeBlockGraph {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    // ── 平行边（一对顶点之间多条边）─────────────────────────────
+    //
+    // 这一组补的是一个真实缺陷：`edge_data` 原来是 `(from,to) -> EdgeData`，
+    // 后写覆盖前写 ⇒ 同一对之间的**第 2 条起属性静默丢失**。
+    // 而拓扑层（`blocks`）本来就是多重的（`out_neighbors` 不去重），
+    // 两层不对称：拓扑知道有 3 条，属性只留得下 1 条。
+    //
+    // 真实场景：一个词可以同时以多种关系指向同一个类（实测 Banyan 的图里
+    // 有 1,986 对节点带 2~10 种关系）。
+
+    fn props(rel: &str) -> HashMap<String, PropertyValue> {
+        let mut m = HashMap::new();
+        m.insert("relation".to_string(),
+                 PropertyValue::String(rel.to_string()));
+        m
+    }
+
+    fn rel_of(d: &EdgeData) -> Option<PropertyValue> {
+        d.properties.get("relation").cloned()
+    }
+
+    #[test]
+    fn test_parallel_edges_are_all_kept() {
+        let mut g = GPUEdgeBlockGraph::new();
+        g.add_vertex(1, HashMap::new());
+        g.add_vertex(2, HashMap::new());
+        g.add_edge_with_props(1, 2, 0.9, props("属于"));
+        g.add_edge_with_props(1, 2, 0.8, props("包含"));
+        g.add_edge_with_props(1, 2, 0.7, props("属于"));
+
+        assert_eq!(g.total_edges, 3);
+        assert_eq!(g.out_neighbors(1), vec![2, 2, 2], "拓扑一直是多重的");
+        assert_eq!(g.get_edges(1, 2).len(), 3, "属性层也必须留住 3 条");
+        assert_eq!(g.get_edges(1, 2).iter().map(rel_of).collect::<Vec<_>>(),
+                   vec![Some(PropertyValue::String("属于".into())),
+                        Some(PropertyValue::String("包含".into())),
+                        Some(PropertyValue::String("属于".into()))],
+                   "顺序必须是添加顺序");
+    }
+
+    #[test]
+    fn test_get_edge_still_returns_last() {
+        // 向后兼容：单值语义保持「最后一条」
+        let mut g = GPUEdgeBlockGraph::new();
+        g.add_edge_with_props(1, 2, 0.9, props("A"));
+        g.add_edge_with_props(1, 2, 0.7, props("B"));
+        let ed = g.get_edge(1, 2).expect("应有边");
+        assert_eq!(ed.weight, 0.7);
+        assert_eq!(rel_of(ed), Some(PropertyValue::String("B".into())));
+    }
+
+    #[test]
+    fn test_out_edges_aligns_topology_with_properties() {
+        // ★ 关键：`out_edges` 里第 i 次出现的 dst 必须对到第 i 条属性。
+        //   两边都是追加序 —— 这个对齐依赖它，所以写一条测试钉住。
+        let mut g = GPUEdgeBlockGraph::new();
+        g.add_edge_with_props(1, 2, 0.9, props("A"));
+        g.add_edge_with_props(1, 3, 0.5, props("B"));
+        g.add_edge_with_props(1, 2, 0.1, props("C"));
+
+        let out = g.out_edges(1);
+        assert_eq!(out.len(), 3);
+        assert_eq!((out[0].0, out[0].1), (2, Some(0.9f32)));
+        assert_eq!((out[1].0, out[1].1), (3, Some(0.5f32)));
+        assert_eq!((out[2].0, out[2].1), (2, Some(0.1f32)));
+        assert_eq!(out[2].2.get("relation"),
+                   Some(&PropertyValue::String("C".into())),
+                   "第三条必须是 C 而不是被覆盖后的值");
+    }
+
+    #[test]
+    fn test_in_edges_symmetric() {
+        let mut g = GPUEdgeBlockGraph::new();
+        g.add_edge_with_props(1, 9, 0.9, props("A"));
+        g.add_edge_with_props(2, 9, 0.8, props("B"));
+        g.add_edge_with_props(1, 9, 0.1, props("C"));
+
+        let inc = g.in_edges(9);
+        assert_eq!(inc.iter().map(|x| x.0).collect::<Vec<_>>(), vec![1, 2, 1]);
+        assert_eq!(inc[2].1, Some(0.1f32));
+    }
+
+    #[test]
+    fn test_out_edges_empty_for_unknown_vertex() {
+        let g = GPUEdgeBlockGraph::new();
+        assert!(g.out_edges(12345).is_empty());
+        assert!(g.get_edges(1, 2).is_empty());
+        assert!(g.in_edges(12345).is_empty());
+    }
+
+    #[test]
+    fn test_parallel_edges_survive_save_load() {
+        // 持久化格式**一个字没改**（写的仍是"边数据条数"，只是现在它包含平行边），
+        // 所以旧文件读得进来、新文件平行边不丢。
+        let path = "/tmp/test_edgeblock_parallel.bin";
+        let _ = std::fs::remove_file(path);
+
+        let mut g = GPUEdgeBlockGraph::new();
+        g.add_edge_with_props(1, 2, 0.9, props("属于"));
+        g.add_edge_with_props(1, 2, 0.8, props("包含"));
+        g.save(path).expect("save failed");
+        let h = GPUEdgeBlockGraph::open(path).expect("open failed");
+
+        assert_eq!(h.total_edges, 2);
+        assert_eq!(h.out_neighbors(1), vec![2, 2]);
+        assert_eq!(h.get_edges(1, 2).len(), 2, "平行边必须往返不丢");
+        assert_eq!(h.out_edges(1)[1].2.get("relation"),
+                   Some(&PropertyValue::String("包含".into())));
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn test_add_vertex_and_edge() {
