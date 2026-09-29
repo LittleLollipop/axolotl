@@ -376,8 +376,15 @@ impl AxolotlGraph {
         Ok(result)
     }
 
-    /// bfs(source) → dict[id → distance]
-    fn bfs<'py>(&self, py: Python<'py>, source: u64) -> PyResult<Bound<'py, PyDict>> {
+    /// bfs(source, max_depth=None) → dict[id → distance]
+    ///
+    /// ★ 2026-09-29 加 `max_depth`（Banyan 实测**倒逼**出来的）：
+    ///   没有它的时候这里**每次都算全图**，于是 Banyan 的 `expand(depth=2)`
+    ///   比 SQLite 慢（0.49x）、只有 d=3 才快（6.42x）——
+    ///   而交叉点本该在 1 跳。缺的**就是这个参数**。
+    #[pyo3(signature = (source, max_depth=None))]
+    fn bfs<'py>(&self, py: Python<'py>, source: u64, max_depth: Option<u32>)
+        -> PyResult<Bound<'py, PyDict>> {
         let db = self.db.lock().unwrap();
         let eb = db.edgeblock().ok_or_else(|| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("Graph not in InMemory mode")
@@ -394,6 +401,13 @@ impl AxolotlGraph {
 
         while let Some(v) = queue.pop_front() {
             let d = dist[&v] + 1;
+            // ★ 超出深度就停：BFS 是**按距离递增**弹出的 ⇒ 一旦 `d > max_depth`，
+            //   后面弹出的只会更远 ⇒ 这里 `break` 是安全的（不是"少收几个"）。
+            if let Some(m) = max_depth {
+                if d > m {
+                    break;
+                }
+            }
             for nbr in eb.out_neighbors(v) {
                 if !dist.contains_key(&nbr) {
                     dist.insert(nbr, d);
