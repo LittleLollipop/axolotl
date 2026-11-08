@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "axolotl_rs"
+description = "Rust graph database with AXEB persistence, WAL and PyO3 bindings"
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/LittleLollipop/axolotl"
+
+[tool.maturin]
+module-name = "axolotl_rs"
+bindings = "pyo3"
+features = ["python-bindings"]

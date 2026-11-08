@@ -21,10 +21,17 @@ pub mod mmap_graph; // mmap 友好格式（支持大于内存的图）
 pub mod edge_block; // EdgeBlock 数据结构（CPU 版本，优化缓存利用率）
 pub mod csr_graph; // CSR 格式图（用于 GPU 加速）
 pub mod gpu_edge_block; // GPU EdgeBlock 格式（扁平化数组，适配 GPU）
+// 以下 4 个算法模块内部直接 `use crate::gpu::GPUAccelerator`，而 gpu 模块只在 macOS 编译
+// （Metal 专属）。非 macOS 平台跳过它们：图存储 / 持久化 / Python 绑定仍走纯 CPU 路径。
+// examples/ 里的 GPU 演示程序同样是 macOS-only，不参与 wheel 构建。
+#[cfg(target_os = "macos")]
 pub mod incremental_pagerank; // CPU/GPU 协同的增量 PageRank
+#[cfg(target_os = "macos")]
 pub mod incremental_bfs; // CPU/GPU 协同的增量 BFS
+#[cfg(target_os = "macos")]
 pub mod incremental_sssp; // CPU/GPU 协同的增量 SSSP
 pub mod incremental_ssspv2; // 增量 SSSP v2（差分 BFS，纯 CPU）
+#[cfg(target_os = "macos")]
 pub mod incremental_sssp_edgeblock; // CPU/GPU 协同的增量 SSSP（使用 EdgeBlock 格式）
 pub mod pagerank_correct; // PageRank CPU 正确实现
 pub mod incremental_cc; // 增量 Connected Components（使用 Union-Find）
@@ -48,10 +55,14 @@ pub use persistence::*;
 // pub use visualization::*;
 pub use edge_block::*; // 导出 EdgeBlock
 pub use csr_graph::*; // 导出 CSRGraph
-pub use incremental_pagerank::IncrementalPageRankEdgeBlock; // 导出增量 PageRank (EdgeBlock)
-pub use incremental_bfs::IncrementalBFS; // 导出增量 BFS
-pub use incremental_sssp::IncrementalSSSP; // 导出增量 SSSP
-pub use incremental_sssp_edgeblock::IncrementalSsspEdgeBlock; // 导出增量 SSSP (EdgeBlock)
+#[cfg(target_os = "macos")]
+pub use incremental_pagerank::IncrementalPageRankEdgeBlock;
+#[cfg(target_os = "macos")]
+pub use incremental_bfs::IncrementalBFS;
+#[cfg(target_os = "macos")]
+pub use incremental_sssp::IncrementalSSSP;
+#[cfg(target_os = "macos")]
+pub use incremental_sssp_edgeblock::IncrementalSsspEdgeBlock;
 pub use incremental_cc::IncrementalCC; // 导出增量 Connected ComponentsP
 
 // 导出 GPU 模块（仅在 macOS 上）
